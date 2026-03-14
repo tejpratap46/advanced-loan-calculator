@@ -1,513 +1,563 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calculator, Calendar, TrendingUp, DollarSign, RotateCcw } from 'lucide-react';
-import "./App.css";
+import { Calculator, Calendar, TrendingUp, DollarSign, RotateCcw, Sun, Moon } from 'lucide-react';
 
-const fmt = (v: number): string => new Intl.NumberFormat('en-IN', {
-	style: 'currency',
-	currency: 'INR',
-	minimumFractionDigits: 2,
-	maximumFractionDigits: 2
+const fmt = (v: number): string => new Intl.NumberFormat('en-US', { 
+  style: 'currency', 
+  currency: 'USD', 
+  minimumFractionDigits: 2, 
+  maximumFractionDigits: 2 
 }).format(v);
 
 const STORAGE_KEY = 'loan-calc-data';
+const THEME_KEY = 'loan-calc-theme';
 
 interface Dispersal {
-	month: number;
-	pct: number;
+  month: number;
+  pct: number;
 }
 
 interface CustomEmi {
-	fromMonth: number;
-	amount: number;
+  fromMonth: number;
+  amount: number;
 }
 
 interface LumpSum {
-	month: number;
-	amount: number;
+  month: number;
+  amount: number;
 }
 
 interface LoanData {
-	principal: number;
-	rate: number;
-	years: number;
-	startDate: string;
-	dispersals: Dispersal[];
-	customEmis: CustomEmi[];
-	lumpSums: LumpSum[];
+  principal: number;
+  rate: number;
+  years: number;
+  startDate: string;
+  dispersals: Dispersal[];
+  customEmis: CustomEmi[];
+  lumpSums: LumpSum[];
 }
 
 interface ScheduleRow {
-	m: number;
-	date: string;
-	disbAmt: number;
-	disbPct: number;
-	emi: number;
-	prinPay: number;
-	intPay: number;
-	remaining: number;
-	cumDisbursed: number;
-	payType: 'none' | 'std' | 'custom' | 'lump';
-	stdEmi: number;
-	customEmiAmt: number | null;
-	lumpAmt: number | null;
+  m: number;
+  date: string;
+  disbAmt: number;
+  disbPct: number;
+  emi: number;
+  prinPay: number;
+  intPay: number;
+  remaining: number;
+  cumDisbursed: number;
+  payType: 'none' | 'std' | 'custom' | 'lump';
+  stdEmi: number;
+  customEmiAmt: number | null;
+  lumpAmt: number | null;
 }
 
 interface Toast {
-	msg: string;
-	type: 'save' | 'reset';
+  msg: string;
+  type: 'save' | 'reset';
 }
 
 interface SmallInpProps {
-	val: number | string;
-	onChange: (val: string) => void;
-	[key: string]: any;
+  val: number | string;
+  onChange: (val: string) => void;
+  [key: string]: any;
 }
 
-const DEFAULTS: LoanData = {
-	principal: 100000,
-	rate: 7.5,
-	years: 20,
-	startDate: new Date().toISOString().split('T')[0],
-	dispersals: [],
-	customEmis: [],
-	lumpSums: []
+const DEFAULTS: LoanData = { 
+  principal: 100000, 
+  rate: 7.5, 
+  years: 20, 
+  startDate: new Date().toISOString().split('T')[0], 
+  dispersals: [], 
+  customEmis: [], 
+  lumpSums: [] 
 };
 
 const SmallInp: React.FC<SmallInpProps> = ({ val, onChange, ...rest }) => (
-	<input
-		type="number"
-		className="inp"
-		style={{ padding: '10px 12px', fontSize: 14 }}
-		value={val}
-		onChange={e => onChange(e.target.value)}
-		{...rest}
-	/>
+  <input 
+    type="number" 
+    className="w-full px-3 py-2.5 bg-white/50 dark:bg-white/10 border border-gray-300 dark:border-white/20 rounded-lg text-gray-900 dark:text-gray-100 text-sm transition-all focus:bg-white dark:focus:bg-white/15 focus:border-blue-500 dark:focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-blue-400/20 outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500" 
+    value={val} 
+    onChange={e => onChange(e.target.value)} 
+    {...rest} 
+  />
 );
 
 export default function LoanCalculator() {
-	const [data, setData] = useState<LoanData>(DEFAULTS);
-	const [loaded, setLoaded] = useState(false);
-	const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | 'error'>('saved');
-	const [toast, setToast] = useState<Toast | null>(null);
+  const [isDark, setIsDark] = useState(false);
+  const [data, setData] = useState<LoanData>(DEFAULTS);
+  const [loaded, setLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'saving' | 'saved'>('saved');
+  const [toast, setToast] = useState<Toast | null>(null);
 
-	const [newDisp, setNewDisp] = useState({ month: 1, pct: 100 });
-	const [showDisp, setShowDisp] = useState(false);
-	const [newEmi, setNewEmi] = useState({ fromMonth: 1, amount: '' });
-	const [showEmi, setShowEmi] = useState(false);
-	const [newLump, setNewLump] = useState({ month: 1, amount: '' });
-	const [showLump, setShowLump] = useState(false);
+  const [newDisp, setNewDisp] = useState({ month: 1, pct: 100 });
+  const [showDisp, setShowDisp] = useState(false);
+  const [newEmi, setNewEmi] = useState({ fromMonth: 1, amount: '' });
+  const [showEmi, setShowEmi] = useState(false);
+  const [newLump, setNewLump] = useState({ month: 1, amount: '' });
+  const [showLump, setShowLump] = useState(false);
 
-	const showToast = (msg: string, type: 'save' | 'reset' = 'save') => {
-		setToast({ msg, type });
-		setTimeout(() => setToast(null), 2500);
-	};
+  const showToast = (msg: string, type: 'save' | 'reset' = 'save') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 2500);
+  };
 
-	// Load on mount
-	useEffect(() => {
-		(async () => {
-			try {
-				const res = await window.localStorage.get(STORAGE_KEY);
-				if (res?.value) setData({ ...DEFAULTS, ...JSON.parse(res.value) });
-			} catch (_) { /* no saved data yet */ }
-			setLoaded(true);
-		})();
-	}, []);
+  // Load theme and data on mount
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem(THEME_KEY);
+      if (savedTheme === 'dark') setIsDark(true);
+      
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (savedData) setData({ ...DEFAULTS, ...JSON.parse(savedData) });
+    } catch (e) {
+      console.error('Error loading data:', e);
+    }
+    setLoaded(true);
+  }, []);
 
-	// Auto-save whenever data changes
-	useEffect(() => {
-		if (!loaded) return;
-		setSaveStatus('saving');
-		const t = setTimeout(async () => {
-			try {
-				await window.localStorage.set(STORAGE_KEY, JSON.stringify(data));
-				setSaveStatus('saved');
-			} catch (_) { setSaveStatus('error'); }
-		}, 400);
-		return () => clearTimeout(t);
-	}, [data, loaded]);
+  // Auto-save data
+  useEffect(() => {
+    if (!loaded) return;
+    setSaveStatus('saving');
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        setSaveStatus('saved');
+      } catch (e) {
+        console.error('Error saving data:', e);
+        setSaveStatus('saved');
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [data, loaded]);
 
-	const schedule = useMemo<ScheduleRow[]>(() => {
-		const { principal, rate, years, startDate, dispersals, customEmis, lumpSums } = data;
-		const mRate = rate / 100 / 12;
-		const totalMonths = years * 12;
-		const rows: ScheduleRow[] = [];
-		const sortedDisp = [...dispersals].sort((a, b) => a.month - b.month);
-		let dispIdx = 0, remaining = 0, cumDisbursed = 0;
+  // Save theme
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
+    } catch (e) {
+      console.error('Error saving theme:', e);
+    }
+  }, [isDark, loaded]);
 
-		const getCE = (m: number): number | null => {
-			const a = customEmis.filter(e => e.fromMonth <= m).sort((a, b) => b.fromMonth - a.fromMonth)[0];
-			return a ? a.amount : null;
-		};
-		const getLS = (m: number): number | null => lumpSums.find(l => l.month === m)?.amount ?? null;
+  const toggleTheme = () => setIsDark(prev => !prev);
 
-		for (let m = 1; m <= totalMonths; m++) {
-			const d = new Date(startDate);
-			d.setMonth(d.getMonth() + m - 1);
-			let disbAmt = 0, disbPct = 0;
-			if (dispIdx < sortedDisp.length && sortedDisp[dispIdx].month === m) {
-				disbPct = sortedDisp[dispIdx].pct;
-				disbAmt = (principal * disbPct) / 100;
-				remaining += disbAmt; cumDisbursed += disbAmt; dispIdx++;
-			}
-			if (remaining <= 0) {
-				rows.push({
-					m,
-					date: d.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
-					disbAmt,
-					disbPct,
-					emi: 0,
-					prinPay: 0,
-					intPay: 0,
-					remaining: 0,
-					cumDisbursed,
-					payType: 'none',
-					stdEmi: 0,
-					customEmiAmt: null,
-					lumpAmt: null
-				});
-				continue;
-			}
+  const schedule = useMemo<ScheduleRow[]>(() => {
+    const { principal, rate, years, startDate, dispersals, customEmis, lumpSums } = data;
+    const mRate = rate / 100 / 12;
+    const totalMonths = years * 12;
+    const rows: ScheduleRow[] = [];
+    const sortedDisp = [...dispersals].sort((a, b) => a.month - b.month);
+    let dispIdx = 0, remaining = 0, cumDisbursed = 0;
 
-			const remMonths = totalMonths - m + 1;
-			const stdEmi = mRate === 0 ? remaining / remMonths : remaining * mRate * Math.pow(1 + mRate, remMonths) / (Math.pow(1 + mRate, remMonths) - 1);
-			const customEmiAmt = getCE(m), lumpAmt = getLS(m);
-			const actualEmi = Math.max(stdEmi, customEmiAmt ?? 0, lumpAmt ?? 0);
-			let payType: ScheduleRow['payType'] = 'std';
-			if (lumpAmt !== null && actualEmi === lumpAmt && lumpAmt > stdEmi) payType = 'lump';
-			else if (customEmiAmt !== null && actualEmi > stdEmi) payType = 'custom';
+    const getCE = (m: number): number | null => { 
+      const a = customEmis.filter(e => e.fromMonth <= m).sort((a, b) => b.fromMonth - a.fromMonth)[0]; 
+      return a ? a.amount : null; 
+    };
+    const getLS = (m: number): number | null => lumpSums.find(l => l.month === m)?.amount ?? null;
 
-			const intPay = remaining * mRate;
-			let prinPay = actualEmi - intPay;
-			if (prinPay > remaining) prinPay = remaining;
-			const emi = intPay + prinPay;
-			remaining = Math.max(0, remaining - prinPay);
-			rows.push({
-				m,
-				date: d.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
-				disbAmt,
-				disbPct,
-				emi,
-				prinPay,
-				intPay,
-				remaining,
-				cumDisbursed,
-				payType,
-				stdEmi,
-				customEmiAmt,
-				lumpAmt
-			});
+    for (let m = 1; m <= totalMonths; m++) {
+      const d = new Date(startDate);
+      d.setMonth(d.getMonth() + m - 1);
+      let disbAmt = 0, disbPct = 0;
+      if (dispIdx < sortedDisp.length && sortedDisp[dispIdx].month === m) {
+        disbPct = sortedDisp[dispIdx].pct;
+        disbAmt = (principal * disbPct) / 100;
+        remaining += disbAmt; cumDisbursed += disbAmt; dispIdx++;
+      }
+      if (remaining <= 0) { 
+        rows.push({ m, date: d.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }), disbAmt, disbPct, emi: 0, prinPay: 0, intPay: 0, remaining: 0, cumDisbursed, payType: 'none', stdEmi: 0, customEmiAmt: null, lumpAmt: null }); 
+        continue; 
+      }
 
-			if (remaining <= 0.01) {
-				for (let rest = m + 1; rest <= totalMonths; rest++) {
-					const rd = new Date(startDate);
-					rd.setMonth(rd.getMonth() + rest - 1);
-					rows.push({
-						m: rest,
-						date: rd.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
-						disbAmt: 0,
-						disbPct: 0,
-						emi: 0,
-						prinPay: 0,
-						intPay: 0,
-						remaining: 0,
-						cumDisbursed,
-						payType: 'none',
-						stdEmi: 0,
-						customEmiAmt: null,
-						lumpAmt: null
-					});
-				}
-				break;
-			}
-		}
-		return rows;
-	}, [data]);
+      const remMonths = totalMonths - m + 1;
+      const stdEmi = mRate === 0 ? remaining / remMonths : remaining * mRate * Math.pow(1 + mRate, remMonths) / (Math.pow(1 + mRate, remMonths) - 1);
+      const customEmiAmt = getCE(m), lumpAmt = getLS(m);
+      const actualEmi = Math.max(stdEmi, customEmiAmt ?? 0, lumpAmt ?? 0);
+      let payType: ScheduleRow['payType'] = 'std';
+      if (lumpAmt !== null && actualEmi === lumpAmt && lumpAmt > stdEmi) payType = 'lump';
+      else if (customEmiAmt !== null && actualEmi > stdEmi) payType = 'custom';
 
-	const totals = useMemo(() => schedule.reduce((a, r) => ({
-		disbursed: Math.max(a.disbursed, r.cumDisbursed),
-		emi: a.emi + r.emi,
-		prin: a.prin + r.prinPay,
-		int: a.int + r.intPay
-	}), { disbursed: 0, emi: 0, prin: 0, int: 0 }), [schedule]);
+      const intPay = remaining * mRate;
+      let prinPay = actualEmi - intPay;
+      if (prinPay > remaining) prinPay = remaining;
+      const emi = intPay + prinPay;
+      remaining = Math.max(0, remaining - prinPay);
+      rows.push({ m, date: d.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }), disbAmt, disbPct, emi, prinPay, intPay, remaining, cumDisbursed, payType, stdEmi, customEmiAmt, lumpAmt });
 
-	const paidOffMonth = schedule.find(r => r.remaining <= 0.01 && r.emi > 0)?.m;
+      if (remaining <= 0.01) {
+        for (let rest = m + 1; rest <= totalMonths; rest++) {
+          const rd = new Date(startDate); rd.setMonth(rd.getMonth() + rest - 1);
+          rows.push({ m: rest, date: rd.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }), disbAmt: 0, disbPct: 0, emi: 0, prinPay: 0, intPay: 0, remaining: 0, cumDisbursed, payType: 'none', stdEmi: 0, customEmiAmt: null, lumpAmt: null });
+        }
+        break;
+      }
+    }
+    return rows;
+  }, [data]);
 
-	const addDispersal = () => {
-		if (newDisp.month < 1 || newDisp.month > data.years * 12 || newDisp.pct <= 0 || newDisp.pct > 100) return;
-		setData(d => ({ ...d, dispersals: [...d.dispersals.filter(x => x.month !== newDisp.month), { ...newDisp }] }));
-		setNewDisp({ month: 1, pct: 100 }); setShowDisp(false);
-	};
+  const totals = useMemo(() => schedule.reduce((a, r) => ({ 
+    disbursed: Math.max(a.disbursed, r.cumDisbursed), 
+    emi: a.emi + r.emi, 
+    prin: a.prin + r.prinPay, 
+    int: a.int + r.intPay 
+  }), { disbursed: 0, emi: 0, prin: 0, int: 0 }), [schedule]);
+  
+  const paidOffMonth = schedule.find(r => r.remaining <= 0.01 && r.emi > 0)?.m;
 
-	const addCustomEmi = () => {
-		const amt = parseFloat(newEmi.amount);
-		if (!amt || amt <= 0 || newEmi.fromMonth < 1) return;
-		setData(d => ({
-			...d,
-			customEmis: [...d.customEmis.filter(e => e.fromMonth !== newEmi.fromMonth), { fromMonth: newEmi.fromMonth, amount: amt }].sort((a, b) => a.fromMonth - b.fromMonth)
-		}));
-		setNewEmi({ fromMonth: 1, amount: '' }); setShowEmi(false);
-	};
+  const addDispersal = () => {
+    if (newDisp.month < 1 || newDisp.month > data.years * 12 || newDisp.pct <= 0 || newDisp.pct > 100) return;
+    setData(d => ({ ...d, dispersals: [...d.dispersals.filter(x => x.month !== newDisp.month), { ...newDisp }] }));
+    setNewDisp({ month: 1, pct: 100 }); setShowDisp(false);
+  };
 
-	const addLumpSum = () => {
-		const amt = parseFloat(newLump.amount);
-		if (!amt || amt <= 0 || newLump.month < 1 || newLump.month > data.years * 12) return;
-		setData(d => ({
-			...d,
-			lumpSums: [...d.lumpSums.filter(l => l.month !== newLump.month), { month: newLump.month, amount: amt }].sort((a, b) => a.month - b.month)
-		}));
-		setNewLump({ month: 1, amount: '' }); setShowLump(false);
-	};
+  const addCustomEmi = () => {
+    const amt = parseFloat(newEmi.amount);
+    if (!amt || amt <= 0 || newEmi.fromMonth < 1) return;
+    setData(d => ({ ...d, customEmis: [...d.customEmis.filter(e => e.fromMonth !== newEmi.fromMonth), { fromMonth: newEmi.fromMonth, amount: amt }].sort((a, b) => a.fromMonth - b.fromMonth) }));
+    setNewEmi({ fromMonth: 1, amount: '' }); setShowEmi(false);
+  };
 
-	const handleReset = async () => {
-		setData(DEFAULTS);
-		try { await window.localStorage.delete(STORAGE_KEY); } catch (_) { /* ignore */ }
-		showToast('All data cleared', 'reset');
-	};
+  const addLumpSum = () => {
+    const amt = parseFloat(newLump.amount);
+    if (!amt || amt <= 0 || newLump.month < 1 || newLump.month > data.years * 12) return;
+    setData(d => ({ ...d, lumpSums: [...d.lumpSums.filter(l => l.month !== newLump.month), { month: newLump.month, amount: amt }].sort((a, b) => a.month - b.month) }));
+    setNewLump({ month: 1, amount: '' }); setShowLump(false);
+  };
 
-	const rowClass = (r: ScheduleRow): string => {
-		if (r.disbAmt > 0) return 'disburse';
-		if (r.payType === 'lump') return 'row-lump';
-		if (r.payType === 'custom') return 'row-custom-emi';
-		return '';
-	};
+  const handleReset = () => {
+    setData(DEFAULTS);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      console.error('Error clearing data:', e);
+    }
+    showToast('All data cleared', 'reset');
+  };
 
-	if (!loaded) return (
-		<div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#0f172a,#1e293b)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-			<div style={{ color: '#60a5fa', fontSize: 18, fontFamily: 'Outfit,sans-serif' }}>Loading saved data…</div>
-		</div>
-	);
+  if (!loaded) return (
+    <div className={isDark ? 'dark' : ''}>
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 flex items-center justify-center">
+        <div className="text-blue-500 dark:text-blue-400 text-lg font-medium">Loading saved data…</div>
+      </div>
+    </div>
+  );
 
-	return (
-		<>
-			<div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%)', padding: '3rem 1.5rem', fontFamily: '"Outfit",-apple-system,sans-serif' }}>
-				{toast && <div className={`toast toast-${toast.type}`}>{toast.type === 'save' ? '☁' : '↺'} {toast.msg}</div>}
+  return (
+    <div className={isDark ? 'dark' : ''}>
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 px-6 py-12 transition-colors duration-300">
+        {/* Toast */}
+        {toast && (
+          <div className={`fixed top-5 right-5 px-6 py-3.5 rounded-xl font-semibold z-50 flex items-center gap-2.5 shadow-2xl animate-[slideIn_0.3s_ease-out] ${
+            toast.type === 'save' 
+              ? 'bg-gradient-to-r from-blue-700 to-blue-800 text-blue-100' 
+              : 'bg-gradient-to-r from-gray-700 to-gray-800 text-gray-100'
+          }`}>
+            {toast.type === 'save' ? '☁' : '↺'} {toast.msg}
+          </div>
+        )}
 
-				{/* Header */}
-				<div style={{ textAlign: 'center', marginBottom: '2.5rem' }} className="fade-up">
-					<div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-						<Calculator size={40} color="#60a5fa" />
-						<h1 style={{ fontSize: '2.5rem', fontWeight: 700, margin: 0, background: 'linear-gradient(135deg,#60a5fa,#3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.5px' }}>
-							Loan Amortization Calculator
-						</h1>
-					</div>
-					<p style={{ color: '#94a3b8', fontSize: '1.1rem', margin: 0, fontWeight: 300 }}>
-						Flexible disbursements · Custom EMI · Lump sum payments · Early payoff tracking
-					</p>
-				</div>
+        {/* Header */}
+        <div className="text-center mb-10 animate-[fadeUp_0.5s_ease-out]">
+          <div className="flex items-center justify-center gap-3 mb-2">
+            <Calculator className="w-10 h-10 text-blue-500 dark:text-blue-400" />
+            <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-400 dark:to-blue-500 bg-clip-text text-transparent">
+              Loan Amortization Calculator
+            </h1>
+          </div>
+          <p className="text-gray-600 dark:text-gray-400 text-lg font-light">
+            Flexible disbursements · Custom EMI · Lump sum payments · Early payoff tracking
+          </p>
+        </div>
 
-				<div style={{ margin: '0 auto' }}>
-					<div className="glass fade-up" style={{ padding: '2rem', marginBottom: '2rem' }}>
-						{/* Header row with save indicator */}
-						<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-							<h2 style={{ color: '#f1f5f9', fontSize: '1.4rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-								<DollarSign size={22} color="#60a5fa" /> Loan Parameters
-							</h2>
-							<div className={`save-indicator ${saveStatus}`}>
-								{saveStatus === 'saving' ? (
-									<><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#60a5fa', display: 'inline-block', animation: 'pulse 1s infinite' }} />Saving…</>
-								) : saveStatus === 'error' ? (
-									<><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fca5a5', display: 'inline-block' }} />Error saving changes</>
-								) : (
-									<><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', display: 'inline-block' }} />All changes saved</>
-								)}
-							</div>
-						</div>
+        <div className="max-w-7xl mx-auto">
+          {/* Main Card */}
+          <div className="bg-white/90 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200 dark:border-slate-700 rounded-3xl shadow-xl dark:shadow-2xl p-8 mb-8 animate-[fadeUp_0.5s_ease-out] transition-colors duration-300">
+            {/* Header with save indicator and theme toggle */}
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2.5">
+                <DollarSign className="w-5 h-5 text-blue-500 dark:text-blue-400" />
+                Loan Parameters
+              </h2>
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={toggleTheme}
+                  className="p-2.5 rounded-xl bg-gray-200 dark:bg-slate-700 hover:bg-gray-300 dark:hover:bg-slate-600 transition-all duration-200 shadow-sm"
+                  aria-label="Toggle theme"
+                >
+                  {isDark ? (
+                    <Sun className="w-5 h-5 text-yellow-400" />
+                  ) : (
+                    <Moon className="w-5 h-5 text-slate-600" />
+                  )}
+                </button>
+                <div className={`flex items-center gap-2 text-xs transition-colors ${
+                  saveStatus === 'saving' ? 'text-blue-500 dark:text-blue-400' : 'text-green-600 dark:text-green-400'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${
+                    saveStatus === 'saving' ? 'bg-blue-500 dark:bg-blue-400 animate-pulse' : 'bg-green-600 dark:bg-green-400'
+                  }`} />
+                  {saveStatus === 'saving' ? 'Saving…' : 'All changes saved'}
+                </div>
+              </div>
+            </div>
 
-						<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '1.5rem' }}>
-							{[
-								{ label: 'Principal Amount ($)', key: 'principal' as const, min: 1000, step: 1000 },
-								{ label: 'Interest Rate (% p.a.)', key: 'rate' as const, min: 0, max: 50, step: 0.1 },
-								{ label: 'Tenure (Years)', key: 'years' as const, min: 1, max: 30 },
-							].map(({ label, key, ...rest }) => (
-								<div key={key}>
-									<label>{label}</label>
-									<input
-										type="number"
-										className="inp"
-										value={data[key]}
-										onChange={e => setData(d => ({ ...d, [key]: Number(e.target.value) }))}
-										{...rest}
-									/>
-								</div>
-							))}
-							<div>
-								<label>Start Date</label>
-								<input
-									type="date"
-									className="inp"
-									value={data.startDate}
-									onChange={e => setData(d => ({ ...d, startDate: e.target.value }))}
-								/>
-							</div>
-						</div>
+            {/* Input Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              {[
+                { label: 'Principal Amount ($)', key: 'principal' as const, min: 1000, step: 1000 },
+                { label: 'Interest Rate (% p.a.)', key: 'rate' as const, min: 0, max: 50, step: 0.1 },
+                { label: 'Tenure (Years)', key: 'years' as const, min: 1, max: 30 },
+              ].map(({ label, key, ...rest }) => (
+                <div key={key}>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{label}</label>
+                  <input 
+                    type="number" 
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-xl text-gray-900 dark:text-gray-100 transition-all focus:bg-white dark:focus:bg-slate-600 focus:border-blue-500 dark:focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-blue-400/20 outline-none"
+                    value={data[key]} 
+                    onChange={e => setData(d => ({ ...d, [key]: Number(e.target.value) }))} 
+                    {...rest} 
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Start Date</label>
+                <input 
+                  type="date" 
+                  className="w-full px-4 py-3 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-xl text-gray-900 dark:text-gray-100 transition-all focus:bg-white dark:focus:bg-slate-600 focus:border-blue-500 dark:focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-blue-400/20 outline-none"
+                  value={data.startDate} 
+                  onChange={e => setData(d => ({ ...d, startDate: e.target.value }))} 
+                />
+              </div>
+            </div>
 
-						{/* 3-column panels */}
-						<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '1.5rem', marginTop: '2rem' }}>
+            {/* 3-column panels */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+              {/* Disbursements */}
+              <div className="p-6 bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-900/20 dark:to-blue-800/10 rounded-2xl border border-blue-200 dark:border-blue-700/50 transition-colors duration-300">
+                <p className="text-base font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2 mb-4">
+                  <TrendingUp className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                  Disbursements
+                </p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {[...data.dispersals].sort((a, b) => a.month - b.month).map(d => (
+                    <span key={d.month} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-700/50 rounded-full text-xs font-medium">
+                      Month {d.month}: {d.pct}%
+                      <button onClick={() => setData(s => ({ ...s, dispersals: s.dispersals.filter(x => x.month !== d.month) }))} className="hover:text-red-600 dark:hover:text-red-400 transition-colors">×</button>
+                    </span>
+                  ))}
+                </div>
+                {!showDisp ? (
+                  <button onClick={() => setShowDisp(true)} className="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 dark:from-blue-600 dark:to-blue-700 text-white rounded-lg text-sm font-semibold hover:shadow-lg transition-all">
+                    + Add
+                  </button>
+                ) : (
+                  <div className="flex flex-wrap gap-2.5 items-end" onKeyDown={e => { if (e.key === 'Enter') addDispersal(); if (e.key === 'Escape') setShowDisp(false); }}>
+                    <div className="flex-1 min-w-[90px]">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Month</label>
+                      <SmallInp val={newDisp.month} onChange={v => setNewDisp({ ...newDisp, month: +v })} min={1} max={data.years * 12} />
+                    </div>
+                    <div className="flex-1 min-w-[90px]">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">% of loan</label>
+                      <SmallInp val={newDisp.pct} onChange={v => setNewDisp({ ...newDisp, pct: +v })} min={0.01} max={100} step={0.01} />
+                    </div>
+                    <button onClick={addDispersal} className="px-3 py-2 bg-blue-500 dark:bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-600 dark:hover:bg-blue-700 transition-colors">Add</button>
+                    <button onClick={() => setShowDisp(false)} className="px-3 py-2 bg-red-500/20 dark:bg-red-500/30 text-red-600 dark:text-red-400 border border-red-500/30 dark:border-red-500/50 rounded-lg text-sm hover:bg-red-500/30 dark:hover:bg-red-500/40 transition-colors">✕</button>
+                  </div>
+                )}
+              </div>
 
-							{/* Disbursements */}
-							<div className="section-panel">
-								<p className="section-title"><TrendingUp size={18} color="#60a5fa" /> Disbursements</p>
-								<div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: data.dispersals.length ? 12 : 0 }}>
-									{[...data.dispersals].sort((a, b) => a.month - b.month).map(d => (
-										<span key={d.month} className="chip">
-											Month {d.month}: {d.pct}%
-											<button
-												onClick={() => setData(s => ({ ...s, dispersals: s.dispersals.filter(x => x.month !== d.month) }))}
-												style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', padding: '0 0 0 4px', fontSize: 16, lineHeight: 1 }}
-											>×</button>
-										</span>
-									))}
-								</div>
-								{!showDisp ? (
-									<button className="btn btn-blue btn-sm" onClick={() => setShowDisp(true)}>+ Add</button>
-								) : (
-									<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }} onKeyDown={e => { if (e.key === 'Enter') addDispersal(); if (e.key === 'Escape') setShowDisp(false); }}>
-										<div style={{ flex: 1, minWidth: 90 }}><label style={{ fontSize: 12 }}>Month</label><SmallInp val={newDisp.month} onChange={v => setNewDisp({ ...newDisp, month: +v })} min={1} max={data.years * 12} /></div>
-										<div style={{ flex: 1, minWidth: 90 }}><label style={{ fontSize: 12 }}>% of loan</label><SmallInp val={newDisp.pct} onChange={v => setNewDisp({ ...newDisp, pct: +v })} min={0.01} max={100} step={0.01} /></div>
-										<button className="btn btn-blue btn-sm" onClick={addDispersal}>Add</button>
-										<button className="btn btn-danger btn-sm" onClick={() => setShowDisp(false)}>✕</button>
-									</div>
-								)}
-							</div>
+              {/* Custom EMI */}
+              <div className="p-6 bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-900/20 dark:to-purple-800/10 rounded-2xl border border-purple-200 dark:border-purple-700/50 transition-colors duration-300">
+                <p className="text-base font-semibold text-gray-800 dark:text-purple-200 flex items-center gap-2 mb-2">
+                  <DollarSign className="w-4 h-4 text-purple-500 dark:text-purple-400" />
+                  Custom EMI
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">Fixed monthly payment from a given month. Actual = max(std, custom).</p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {data.customEmis.map(e => (
+                    <span key={e.fromMonth} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700/50 rounded-full text-xs font-medium">
+                      From M{e.fromMonth}: {fmt(e.amount)}
+                      <button onClick={() => setData(s => ({ ...s, customEmis: s.customEmis.filter(x => x.fromMonth !== e.fromMonth) }))} className="hover:text-red-600 dark:hover:text-red-400 transition-colors">×</button>
+                    </span>
+                  ))}
+                </div>
+                {!showEmi ? (
+                  <button onClick={() => setShowEmi(true)} className="px-4 py-2 bg-gradient-to-r from-purple-500 to-purple-600 dark:from-purple-600 dark:to-purple-700 text-white rounded-lg text-sm font-semibold hover:shadow-lg transition-all">
+                    + Add
+                  </button>
+                ) : (
+                  <div className="flex flex-wrap gap-2.5 items-end" onKeyDown={e => { if (e.key === 'Enter') addCustomEmi(); if (e.key === 'Escape') setShowEmi(false); }}>
+                    <div className="flex-1 min-w-[90px]">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">From Month</label>
+                      <SmallInp val={newEmi.fromMonth} onChange={v => setNewEmi({ ...newEmi, fromMonth: +v })} min={1} max={data.years * 12} />
+                    </div>
+                    <div className="flex-1 min-w-[110px]">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Amount ($)</label>
+                      <SmallInp val={newEmi.amount} onChange={v => setNewEmi({ ...newEmi, amount: v })} min={1} step={100} placeholder="e.g. 1500" />
+                    </div>
+                    <button onClick={addCustomEmi} className="px-3 py-2 bg-purple-500 dark:bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-600 dark:hover:bg-purple-700 transition-colors">Add</button>
+                    <button onClick={() => setShowEmi(false)} className="px-3 py-2 bg-red-500/20 dark:bg-red-500/30 text-red-600 dark:text-red-400 border border-red-500/30 dark:border-red-500/50 rounded-lg text-sm hover:bg-red-500/30 dark:hover:bg-red-500/40 transition-colors">✕</button>
+                  </div>
+                )}
+              </div>
 
-							{/* Custom EMI */}
-							<div className="section-panel" style={{ borderColor: 'rgba(139,92,246,0.25)' }}>
-								<p className="section-title" style={{ color: '#c4b5fd' }}><DollarSign size={18} color="#a78bfa" /> Custom EMI</p>
-								<p style={{ color: '#94a3b8', fontSize: 12, margin: '0 0 12px' }}>Fixed monthly payment from a given month onwards. Actual = max(std EMI, custom EMI).</p>
-								<div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: data.customEmis.length ? 12 : 0 }}>
-									{data.customEmis.map(e => (
-										<span key={e.fromMonth} className="chip chip-purple">
-											From M{e.fromMonth}: {fmt(e.amount)}
-											<button
-												onClick={() => setData(s => ({ ...s, customEmis: s.customEmis.filter(x => x.fromMonth !== e.fromMonth) }))}
-												style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', padding: '0 0 0 4px', fontSize: 16, lineHeight: 1 }}
-											>×</button>
-										</span>
-									))}
-								</div>
-								{!showEmi ? (
-									<button className="btn btn-sm" style={{ background: 'linear-gradient(135deg,#7c3aed,#6d28d9)', color: '#fff', border: 'none' }} onClick={() => setShowEmi(true)}>+ Add</button>
-								) : (
-									<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }} onKeyDown={e => { if (e.key === 'Enter') addCustomEmi(); if (e.key === 'Escape') setShowEmi(false); }}>
-										<div style={{ flex: 1, minWidth: 90 }}><label style={{ fontSize: 12 }}>From Month</label><SmallInp val={newEmi.fromMonth} onChange={v => setNewEmi({ ...newEmi, fromMonth: +v })} min={1} max={data.years * 12} /></div>
-										<div style={{ flex: 1, minWidth: 110 }}><label style={{ fontSize: 12 }}>Amount ($)</label><SmallInp val={newEmi.amount} onChange={v => setNewEmi({ ...newEmi, amount: v })} min={1} step={100} placeholder="e.g. 1500" /></div>
-										<button className="btn btn-sm" style={{ background: 'linear-gradient(135deg,#7c3aed,#6d28d9)', color: '#fff', border: 'none' }} onClick={addCustomEmi}>Add</button>
-										<button className="btn btn-danger btn-sm" onClick={() => setShowEmi(false)}>✕</button>
-									</div>
-								)}
-							</div>
+              {/* Lump Sum */}
+              <div className="p-6 bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-900/20 dark:to-amber-800/10 rounded-2xl border border-amber-200 dark:border-amber-700/50 transition-colors duration-300">
+                <p className="text-base font-semibold text-gray-800 dark:text-amber-200 flex items-center gap-2 mb-2">
+                  <DollarSign className="w-4 h-4 text-amber-500 dark:text-amber-400" />
+                  Lump Sum Payment
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">One-time large payment. Actual = max(std, custom, lump).</p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {data.lumpSums.map(l => (
+                    <span key={l.month} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/50 rounded-full text-xs font-medium">
+                      Month {l.month}: {fmt(l.amount)}
+                      <button onClick={() => setData(s => ({ ...s, lumpSums: s.lumpSums.filter(x => x.month !== l.month) }))} className="hover:text-red-600 dark:hover:text-red-400 transition-colors">×</button>
+                    </span>
+                  ))}
+                </div>
+                {!showLump ? (
+                  <button onClick={() => setShowLump(true)} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 dark:from-amber-600 dark:to-amber-700 text-white rounded-lg text-sm font-semibold hover:shadow-lg transition-all">
+                    + Add
+                  </button>
+                ) : (
+                  <div className="flex flex-wrap gap-2.5 items-end" onKeyDown={e => { if (e.key === 'Enter') addLumpSum(); if (e.key === 'Escape') setShowLump(false); }}>
+                    <div className="flex-1 min-w-[90px]">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Month</label>
+                      <SmallInp val={newLump.month} onChange={v => setNewLump({ ...newLump, month: +v })} min={1} max={data.years * 12} />
+                    </div>
+                    <div className="flex-1 min-w-[110px]">
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Amount ($)</label>
+                      <SmallInp val={newLump.amount} onChange={v => setNewLump({ ...newLump, amount: v })} min={1} step={1000} placeholder="e.g. 20000" />
+                    </div>
+                    <button onClick={addLumpSum} className="px-3 py-2 bg-amber-500 dark:bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-600 dark:hover:bg-amber-700 transition-colors">Add</button>
+                    <button onClick={() => setShowLump(false)} className="px-3 py-2 bg-red-500/20 dark:bg-red-500/30 text-red-600 dark:text-red-400 border border-red-500/30 dark:border-red-500/50 rounded-lg text-sm hover:bg-red-500/30 dark:hover:bg-red-500/40 transition-colors">✕</button>
+                  </div>
+                )}
+              </div>
+            </div>
 
-							{/* Lump Sum */}
-							<div className="section-panel" style={{ borderColor: 'rgba(245,158,11,0.25)' }}>
-								<p className="section-title" style={{ color: '#fcd34d' }}><DollarSign size={18} color="#f59e0b" /> Lump Sum Payment</p>
-								<p style={{ color: '#94a3b8', fontSize: 12, margin: '0 0 12px' }}>One-time large payment for a specific month. Actual = max(std EMI, custom EMI, lump sum).</p>
-								<div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: data.lumpSums.length ? 12 : 0 }}>
-									{data.lumpSums.map(l => (
-										<span key={l.month} className="chip chip-amber">
-											Month {l.month}: {fmt(l.amount)}
-											<button
-												onClick={() => setData(s => ({ ...s, lumpSums: s.lumpSums.filter(x => x.month !== l.month) }))}
-												style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', padding: '0 0 0 4px', fontSize: 16, lineHeight: 1 }}
-											>×</button>
-										</span>
-									))}
-								</div>
-								{!showLump ? (
-									<button className="btn btn-sm" style={{ background: 'linear-gradient(135deg,#d97706,#b45309)', color: '#fff', border: 'none' }} onClick={() => setShowLump(true)}>+ Add</button>
-								) : (
-									<div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }} onKeyDown={e => { if (e.key === 'Enter') addLumpSum(); if (e.key === 'Escape') setShowLump(false); }}>
-										<div style={{ flex: 1, minWidth: 90 }}><label style={{ fontSize: 12 }}>Month</label><SmallInp val={newLump.month} onChange={v => setNewLump({ ...newLump, month: +v })} min={1} max={data.years * 12} /></div>
-										<div style={{ flex: 1, minWidth: 110 }}><label style={{ fontSize: 12 }}>Amount ($)</label><SmallInp val={newLump.amount} onChange={v => setNewLump({ ...newLump, amount: v })} min={1} step={1000} placeholder="e.g. 20000" /></div>
-										<button className="btn btn-sm" style={{ background: 'linear-gradient(135deg,#d97706,#b45309)', color: '#fff', border: 'none' }} onClick={addLumpSum}>Add</button>
-										<button className="btn btn-danger btn-sm" onClick={() => setShowLump(false)}>✕</button>
-									</div>
-								)}
-							</div>
-						</div>
+            {/* Reset button */}
+            <div className="flex justify-end">
+              <button onClick={handleReset} className="px-6 py-2.5 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-slate-600 rounded-lg font-semibold hover:bg-gray-300 dark:hover:bg-slate-600 transition-all flex items-center gap-2">
+                <RotateCcw className="w-4 h-4" />
+                Reset All
+              </button>
+            </div>
+          </div>
 
-						{/* Reset only */}
-						<div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
-							<button className="btn btn-ghost" onClick={handleReset}>
-								<RotateCcw size={16} /> Reset All
-							</button>
-						</div>
-					</div>
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 animate-[fadeUp_0.5s_ease-out]">
+            {[
+              { label: 'Total Disbursed', val: totals.disbursed, colorLight: 'blue-600', colorDark: 'blue-400' },
+              { label: 'Total Interest', val: totals.int, colorLight: 'amber-600', colorDark: 'amber-400' },
+              { label: 'Total Principal Paid', val: totals.prin, colorLight: 'green-600', colorDark: 'green-400' },
+              { label: 'Total Amount Payable', val: totals.prin + totals.int, colorLight: 'purple-600', colorDark: 'purple-400' },
+            ].map(({ label, val, colorLight, colorDark }) => (
+              <div key={label} className="relative overflow-hidden bg-white/90 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200 dark:border-slate-700 rounded-2xl shadow-lg dark:shadow-xl p-6 transition-colors duration-300">
+                <div className={`absolute top-0 left-0 right-0 h-1 bg-${colorLight} dark:bg-${colorDark}`} />
+                <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">{label}</div>
+                <div className={`text-3xl font-bold text-${colorLight} dark:text-${colorDark} font-mono`}>{fmt(val)}</div>
+              </div>
+            ))}
+          </div>
 
-					{/* Summary */}
-					<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '1.5rem', marginBottom: '2rem' }} className="fade-up">
-						{[
-							{ label: 'Total Disbursed', val: totals.disbursed, color: '#60a5fa' },
-							{ label: 'Total Interest', val: totals.int, color: '#f59e0b' },
-							{ label: 'Total Principal Paid', val: totals.prin, color: '#22c55e' },
-							{ label: 'Total Amount Payable', val: totals.prin + totals.int, color: '#a78bfa' },
-						].map(({ label, val, color }) => (
-							<div key={label} className="stat-card">
-								<div style={{ color: '#94a3b8', fontSize: 13, fontWeight: 500, marginBottom: 8 }}>{label}</div>
-								<div style={{ color, fontSize: '1.7rem', fontWeight: 700, fontFamily: 'JetBrains Mono,monospace' }}>{fmt(val)}</div>
-							</div>
-						))}
-					</div>
+          {/* Early payoff banner */}
+          {paidOffMonth && paidOffMonth < data.years * 12 && (
+            <div className="bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700/50 rounded-2xl p-5 mb-8 text-green-800 dark:text-green-300 font-semibold flex items-center gap-3 transition-colors duration-300">
+              🎉 Loan fully paid off by <strong>Month {paidOffMonth}</strong> — that's <strong>{data.years * 12 - paidOffMonth} months early</strong>!
+            </div>
+          )}
 
-					{paidOffMonth && paidOffMonth < data.years * 12 && (
-						<div style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 16, padding: '1rem 1.5rem', marginBottom: '1.5rem', color: '#86efac', fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 10 }}>
-							🎉 Loan fully paid off by <strong>Month {paidOffMonth}</strong> — that's <strong>{data.years * 12 - paidOffMonth} months early</strong>!
-						</div>
-					)}
+          {/* Table */}
+          <div className="bg-white/90 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200 dark:border-slate-700 rounded-3xl shadow-xl dark:shadow-2xl p-8 animate-[fadeUp_0.5s_ease-out] transition-colors duration-300">
+            <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center gap-2.5">
+              <Calendar className="w-5 h-5 text-blue-500 dark:text-blue-400" />
+              Amortization Schedule
+            </h2>
+            <div className="flex flex-wrap gap-3 mb-6">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-700/50 rounded-full text-xs font-medium">
+                🟢 Disbursement
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700/50 rounded-full text-xs font-medium">
+                🟣 Custom EMI active
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/50 rounded-full text-xs font-medium">
+                🟡 Lump sum payment
+              </span>
+            </div>
+            <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-slate-700 max-h-[600px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-blue-50 dark:bg-blue-900/30 sticky top-0 z-10">
+                  <tr>
+                    {['Month', 'Date', 'Disbursement', 'EMI Paid', 'Std. EMI', 'Custom EMI', 'Lump Sum', 'Principal', 'Interest', 'Balance'].map(h => (
+                      <th key={h} className="px-3 py-4 text-left font-semibold text-xs text-blue-700 dark:text-blue-300 uppercase tracking-wide border-b-2 border-blue-200 dark:border-blue-700/50 whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedule.map(r => (
+                    <tr key={r.m} className={`border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30 transition-colors ${
+                      r.disbAmt > 0 ? 'bg-green-50/50 dark:bg-green-900/10' :
+                      r.payType === 'lump' ? 'bg-amber-50/50 dark:bg-amber-900/10' :
+                      r.payType === 'custom' ? 'bg-purple-50/50 dark:bg-purple-900/10' : ''
+                    }`}>
+                      <td className="px-3 py-3 text-gray-800 dark:text-gray-200 font-mono whitespace-nowrap">
+                        {r.m}
+                        {r.payType === 'lump' && <span className="ml-2 px-2 py-0.5 bg-amber-200 dark:bg-amber-700/50 text-amber-800 dark:text-amber-300 rounded text-[10px] font-bold uppercase">LUMP</span>}
+                        {r.payType === 'custom' && <span className="ml-2 px-2 py-0.5 bg-purple-200 dark:bg-purple-700/50 text-purple-800 dark:text-purple-300 rounded text-[10px] font-bold uppercase">CEMI</span>}
+                      </td>
+                      <td className="px-3 py-3 text-gray-700 dark:text-gray-300 font-mono whitespace-nowrap">{r.date}</td>
+                      <td className={`px-3 py-3 font-mono whitespace-nowrap ${r.disbAmt > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-600'}`}>
+                        {r.disbAmt > 0 ? `${fmt(r.disbAmt)} (${r.disbPct}%)` : '—'}
+                      </td>
+                      <td className={`px-3 py-3 font-mono whitespace-nowrap ${
+                        r.payType === 'lump' ? 'text-amber-600 dark:text-amber-400 font-semibold' :
+                        r.payType === 'custom' ? 'text-purple-600 dark:text-purple-400 font-semibold' :
+                        'text-gray-700 dark:text-gray-300'
+                      }`}>
+                        {r.emi > 0 ? fmt(r.emi) : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-gray-500 dark:text-gray-400 font-mono whitespace-nowrap">{r.stdEmi > 0 ? fmt(r.stdEmi) : '—'}</td>
+                      <td className={`px-3 py-3 font-mono whitespace-nowrap ${r.customEmiAmt ? 'text-purple-600 dark:text-purple-400' : 'text-gray-400 dark:text-gray-600'}`}>
+                        {r.customEmiAmt ? fmt(r.customEmiAmt) : '—'}
+                      </td>
+                      <td className={`px-3 py-3 font-mono whitespace-nowrap ${r.lumpAmt ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-600'}`}>
+                        {r.lumpAmt ? fmt(r.lumpAmt) : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-green-600 dark:text-green-400 font-mono whitespace-nowrap">{r.prinPay > 0 ? fmt(r.prinPay) : '—'}</td>
+                      <td className="px-3 py-3 text-amber-600 dark:text-amber-400 font-mono whitespace-nowrap">{r.intPay > 0 ? fmt(r.intPay) : '—'}</td>
+                      <td className={`px-3 py-3 font-mono whitespace-nowrap ${r.remaining < 1 ? 'text-green-600 dark:text-green-400 font-bold' : 'text-gray-700 dark:text-gray-300'}`}>
+                        {fmt(r.remaining)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-blue-50 dark:bg-blue-900/30 font-semibold border-t-2 border-blue-200 dark:border-blue-700/50">
+                  <tr>
+                    <td colSpan={3} className="px-3 py-4 text-blue-700 dark:text-blue-300 uppercase text-xs tracking-wide">TOTALS</td>
+                    <td className="px-3 py-4 text-gray-800 dark:text-gray-200 font-mono">{fmt(totals.emi)}</td>
+                    <td colSpan={3}></td>
+                    <td className="px-3 py-4 text-green-600 dark:text-green-400 font-mono">{fmt(totals.prin)}</td>
+                    <td className="px-3 py-4 text-amber-600 dark:text-amber-400 font-mono">{fmt(totals.int)}</td>
+                    <td className="px-3 py-4 text-gray-500 dark:text-gray-400">—</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
 
-					{/* Table */}
-					<div className="glass fade-up" style={{ padding: '2rem' }}>
-						<h2 style={{ color: '#f1f5f9', fontSize: '1.4rem', fontWeight: 600, marginTop: 0, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: 10 }}>
-							<Calendar size={22} color="#60a5fa" /> Amortization Schedule
-						</h2>
-						<div style={{ display: 'flex', gap: 12, marginBottom: '1rem', flexWrap: 'wrap' }}>
-							<span className="chip">🟢 Disbursement</span>
-							<span className="chip chip-purple">🟣 Custom EMI active</span>
-							<span className="chip chip-amber">🟡 Lump sum payment</span>
-						</div>
-						<div className="tbl-wrap">
-							<table>
-								<thead>
-									<tr>
-										<th>Month</th><th>Date</th><th>Disbursement</th><th>EMI Paid</th>
-										<th>Std. EMI</th><th>Custom EMI</th><th>Lump Sum</th>
-										<th>Principal</th><th>Interest</th><th>Balance</th>
-									</tr>
-								</thead>
-								<tbody>
-									{schedule.map(r => (
-										<tr key={r.m} className={rowClass(r)}>
-											<td>
-												{r.m}
-												{r.payType === 'lump' && <span className="tag-pill" style={{ background: 'rgba(245,158,11,0.3)', color: '#fcd34d' }}>LUMP</span>}
-												{r.payType === 'custom' && <span className="tag-pill" style={{ background: 'rgba(139,92,246,0.3)', color: '#c4b5fd' }}>CEMI</span>}
-											</td>
-											<td>{r.date}</td>
-											<td style={{ color: r.disbAmt > 0 ? '#86efac' : '#475569' }}>{r.disbAmt > 0 ? `${fmt(r.disbAmt)} (${r.disbPct}%)` : '—'}</td>
-											<td style={{ color: r.payType === 'lump' ? '#fcd34d' : r.payType === 'custom' ? '#c4b5fd' : '#e2e8f0', fontWeight: r.payType !== 'std' ? 600 : 400 }}>{r.emi > 0 ? fmt(r.emi) : '—'}</td>
-											<td style={{ color: '#94a3b8' }}>{r.stdEmi > 0 ? fmt(r.stdEmi) : '—'}</td>
-											<td style={{ color: r.customEmiAmt ? '#c4b5fd' : '#475569' }}>{r.customEmiAmt ? fmt(r.customEmiAmt) : '—'}</td>
-											<td style={{ color: r.lumpAmt ? '#fcd34d' : '#475569' }}>{r.lumpAmt ? fmt(r.lumpAmt) : '—'}</td>
-											<td style={{ color: '#86efac' }}>{r.prinPay > 0 ? fmt(r.prinPay) : '—'}</td>
-											<td style={{ color: '#fbbf24' }}>{r.intPay > 0 ? fmt(r.intPay) : '—'}</td>
-											<td style={{ color: r.remaining < 1 ? '#86efac' : '#e2e8f0', fontWeight: r.remaining < 1 ? 700 : 400 }}>{fmt(r.remaining)}</td>
-										</tr>
-									))}
-								</tbody>
-								<tfoot>
-									<tr>
-										<td colSpan={3}>TOTALS</td>
-										<td>{fmt(totals.emi)}</td>
-										<td colSpan={3}></td>
-										<td style={{ color: '#86efac' }}>{fmt(totals.prin)}</td>
-										<td style={{ color: '#fbbf24' }}>{fmt(totals.int)}</td>
-										<td>—</td>
-									</tr>
-								</tfoot>
-							</table>
-						</div>
-					</div>
-				</div>
-			</div>
-		</>
-	);
+        <style>{`
+          @keyframes slideIn { from { opacity: 0; transform: translateX(100px); } to { opacity: 1; transform: translateX(0); } }
+          @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        `}</style>
+      </div>
+    </div>
+  );
 }
