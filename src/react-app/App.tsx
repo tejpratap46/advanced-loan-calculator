@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calculator, Calendar, TrendingUp, DollarSign, RotateCcw, Sun, Moon, Share2, Copy, Check } from 'lucide-react';
+import { Calculator, Calendar, TrendingUp, DollarSign, RotateCcw, Sun, Moon, Share2, Copy, Check, Download } from 'lucide-react';
 
 const STORAGE_KEY = 'loan-calc-data';
 const THEME_KEY = 'loan-calc-theme';
@@ -123,8 +123,8 @@ const SmallInp: React.FC<SmallInpProps> = ({ val, onChange, ...rest }) => (
 );
 
 export default function LoanCalculator() {
-  const [currency] = useState(getUserCurrency());
-  const [locale] = useState(getUserLocale());
+  const [currency, setCurrency] = useState(getUserCurrency());
+  const [locale, setLocale] = useState(getUserLocale());
   const [isDark, setIsDark] = useState(false);
   const [data, setData] = useState<LoanData>(DEFAULTS);
   const [loaded, setLoaded] = useState(false);
@@ -191,6 +191,131 @@ export default function LoanCalculator() {
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
       showToast('Failed to copy link', 'error');
+    }
+  };
+
+  // Handle share - use native share if available, otherwise show modal
+  const handleShare = async () => {
+    const url = getShareUrl();
+    
+    // Check if Web Share API is available (mobile devices)
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Loan Amortization Calculator',
+          text: 'Check out my loan calculation',
+          url: url,
+        });
+        showToast('Shared successfully!', 'success');
+      } catch (err: any) {
+        // User cancelled share or error occurred
+        if (err.name !== 'AbortError') {
+          console.error('Share failed:', err);
+          setShowShareModal(true); // Fallback to modal
+        }
+      }
+    } else {
+      // Fallback to modal for desktop
+      setShowShareModal(true);
+    }
+  };
+
+  // Download as CSV
+  const downloadCSV = () => {
+    try {
+      // CSV Header
+      const headers = [
+        'Month',
+        'Date',
+        'Status',
+        'Disbursement',
+        'Disbursement %',
+        'EMI Paid',
+        'Standard EMI',
+        'Custom EMI',
+        'Lump Sum',
+        'Principal',
+        'Interest',
+        'Balance'
+      ];
+
+      // CSV Rows
+      const rows = schedule.map(r => {
+        const isCurrent = r.m === currentMonth;
+        const isPaid = r.m < currentMonth;
+        const isPending = r.m > currentMonth;
+        const status = r.emi === 0 ? '-' : isPaid ? 'Paid' : isCurrent ? 'Current' : 'Pending';
+
+        return [
+          r.m,
+          r.date,
+          status,
+          r.disbAmt > 0 ? r.disbAmt.toFixed(2) : '',
+          r.disbPct > 0 ? r.disbPct : '',
+          r.emi > 0 ? r.emi.toFixed(2) : '',
+          r.stdEmi > 0 ? r.stdEmi.toFixed(2) : '',
+          r.customEmiAmt ? r.customEmiAmt.toFixed(2) : '',
+          r.lumpAmt ? r.lumpAmt.toFixed(2) : '',
+          r.prinPay > 0 ? r.prinPay.toFixed(2) : '',
+          r.intPay > 0 ? r.intPay.toFixed(2) : '',
+          r.remaining.toFixed(2)
+        ];
+      });
+
+      // Summary row
+      const summaryRow = [
+        'TOTALS',
+        '',
+        '',
+        totals.disbursed.toFixed(2),
+        '',
+        totals.emi.toFixed(2),
+        '',
+        '',
+        '',
+        totals.prin.toFixed(2),
+        totals.int.toFixed(2),
+        ''
+      ];
+
+      // Build CSV content
+      const csvContent = [
+        // Metadata
+        ['Loan Amortization Schedule'],
+        ['Generated on', new Date().toLocaleDateString(locale)],
+        ['Currency', currency],
+        ['Principal', data.principal],
+        ['Interest Rate (%)', data.rate],
+        ['Tenure (Years)', data.years],
+        ['Start Date', data.startDate],
+        [],
+        headers,
+        ...rows,
+        summaryRow
+      ].map(row => row.map(cell => {
+        // Escape cells containing commas or quotes
+        const cellStr = String(cell);
+        if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+          return `"${cellStr.replace(/"/g, '""')}"`;
+        }
+        return cellStr;
+      }).join(',')).join('\n');
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `loan-amortization-${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      showToast('CSV downloaded successfully!', 'success');
+    } catch (e) {
+      console.error('Download failed:', e);
+      showToast('Failed to download CSV', 'error');
     }
   };
 
@@ -280,6 +405,14 @@ export default function LoanCalculator() {
 
   const toggleTheme = () => setIsDark(prev => !prev);
 
+  // Calculate current month relative to start date
+  const getCurrentMonth = (): number => {
+    const start = new Date(data.startDate);
+    const now = new Date();
+    const diffMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth()) + 1;
+    return Math.max(1, diffMonths);
+  };
+
   const schedule = useMemo<ScheduleRow[]>(() => {
     const { principal, rate, years, startDate, dispersals, customEmis, lumpSums } = data;
     const mRate = rate / 100 / 12;
@@ -342,6 +475,19 @@ export default function LoanCalculator() {
   }), { disbursed: 0, emi: 0, prin: 0, int: 0 }), [schedule]);
   
   const paidOffMonth = schedule.find(r => r.remaining <= 0.01 && r.emi > 0)?.m;
+  const currentMonth = getCurrentMonth();
+  
+  // Calculate paid and pending amounts
+  const paidTillNow = useMemo(() => {
+    const tillMonth = Math.min(currentMonth, schedule.length);
+    return schedule.slice(0, tillMonth).reduce((sum, r) => sum + r.emi, 0);
+  }, [schedule, currentMonth]);
+  
+  const pendingAmount = useMemo(() => {
+    const fromMonth = currentMonth;
+    if (fromMonth >= schedule.length) return 0;
+    return schedule.slice(fromMonth).reduce((sum, r) => sum + r.emi, 0);
+  }, [schedule, currentMonth]);
 
   const addDispersal = () => {
     if (newDisp.month < 1 || newDisp.month > data.years * 12 || newDisp.pct <= 0 || newDisp.pct > 100) return;
@@ -447,7 +593,15 @@ export default function LoanCalculator() {
             </h2>
             <div className="flex items-center gap-4">
               <button 
-                onClick={() => setShowShareModal(true)}
+                onClick={downloadCSV}
+                className="p-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white transition-all duration-200 shadow-sm"
+                aria-label="Download CSV"
+                title="Download as CSV"
+              >
+                <Download className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={handleShare}
                 className="p-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white transition-all duration-200 shadow-sm"
                 aria-label="Share calculation"
                 title="Share calculation"
@@ -629,12 +783,13 @@ export default function LoanCalculator() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 animate-[fadeUp_0.5s_ease-out]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8 animate-[fadeUp_0.5s_ease-out]">
           {[
             { label: 'Total Disbursed', val: totals.disbursed, colorLight: 'blue-600', colorDark: 'blue-400' },
             { label: 'Total Interest', val: totals.int, colorLight: 'amber-600', colorDark: 'amber-400' },
             { label: 'Total Principal Paid', val: totals.prin, colorLight: 'green-600', colorDark: 'green-400' },
-            { label: 'Total Amount Payable', val: totals.prin + totals.int, colorLight: 'purple-600', colorDark: 'purple-400' },
+            { label: 'Paid Till Now', val: paidTillNow, colorLight: 'cyan-600', colorDark: 'cyan-400' },
+            { label: 'Still Pending', val: pendingAmount, colorLight: 'rose-600', colorDark: 'rose-400' },
           ].map(({ label, val, colorLight, colorDark }) => (
             <div key={label} className="relative overflow-hidden bg-white/90 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200 dark:border-slate-700 rounded-2xl shadow-lg dark:shadow-xl p-6 transition-colors duration-300">
               <div className={`absolute top-0 left-0 right-0 h-1 bg-${colorLight} dark:bg-${colorDark}`} />
@@ -672,7 +827,7 @@ export default function LoanCalculator() {
             <table className="w-full text-sm">
               <thead className="bg-blue-50 dark:bg-blue-900/30 sticky top-0 z-10">
                 <tr>
-                  {['Month', 'Date', 'Disbursement', 'EMI Paid', 'Std. EMI', 'Custom EMI', 'Lump Sum', 'Principal', 'Interest', 'Balance'].map(h => (
+                  {['Month', 'Date', 'Status', 'Disbursement', 'EMI Paid', 'Std. EMI', 'Custom EMI', 'Lump Sum', 'Principal', 'Interest', 'Balance'].map(h => (
                     <th key={h} className="px-3 py-4 text-left font-semibold text-xs text-blue-700 dark:text-blue-300 uppercase tracking-wide border-b-2 border-blue-200 dark:border-blue-700/50 whitespace-nowrap">
                       {h}
                     </th>
@@ -680,18 +835,43 @@ export default function LoanCalculator() {
                 </tr>
               </thead>
               <tbody>
-                {schedule.map(r => (
+                {schedule.map(r => {
+                  const isCurrent = r.m === currentMonth;
+                  const isPaid = r.m < currentMonth;
+                  const isPending = r.m > currentMonth;
+                  
+                  return (
                   <tr key={r.m} className={`border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30 transition-colors ${
+                    isCurrent ? 'bg-blue-100 dark:bg-blue-900/30 ring-2 ring-blue-400 dark:ring-blue-500' :
                     r.disbAmt > 0 ? 'bg-green-50/50 dark:bg-green-900/10' :
                     r.payType === 'lump' ? 'bg-amber-50/50 dark:bg-amber-900/10' :
                     r.payType === 'custom' ? 'bg-purple-50/50 dark:bg-purple-900/10' : ''
                   }`}>
                     <td className="px-3 py-3 text-gray-800 dark:text-gray-200 font-mono whitespace-nowrap">
                       {r.m}
+                      {isCurrent && <span className="ml-2 px-2 py-0.5 bg-blue-500 text-white rounded text-[10px] font-bold uppercase">NOW</span>}
                       {r.payType === 'lump' && <span className="ml-2 px-2 py-0.5 bg-amber-200 dark:bg-amber-700/50 text-amber-800 dark:text-amber-300 rounded text-[10px] font-bold uppercase">LUMP</span>}
                       {r.payType === 'custom' && <span className="ml-2 px-2 py-0.5 bg-purple-200 dark:bg-purple-700/50 text-purple-800 dark:text-purple-300 rounded text-[10px] font-bold uppercase">CEMI</span>}
                     </td>
                     <td className="px-3 py-3 text-gray-700 dark:text-gray-300 font-mono whitespace-nowrap">{r.date}</td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {isPaid && r.emi > 0 && (
+                        <span className="px-2 py-1 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-700/50 rounded-md text-xs font-semibold">
+                          ✓ Paid
+                        </span>
+                      )}
+                      {isCurrent && r.emi > 0 && (
+                        <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700/50 rounded-md text-xs font-semibold">
+                          ◉ Current
+                        </span>
+                      )}
+                      {isPending && r.emi > 0 && (
+                        <span className="px-2 py-1 bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700/50 rounded-md text-xs font-semibold">
+                          ⧗ Pending
+                        </span>
+                      )}
+                      {r.emi === 0 && <span className="text-gray-400 dark:text-gray-600 text-xs">—</span>}
+                    </td>
                     <td className={`px-3 py-3 font-mono whitespace-nowrap ${r.disbAmt > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-600'}`}>
                       {r.disbAmt > 0 ? `${fmt(r.disbAmt)} (${r.disbPct}%)` : '—'}
                     </td>
@@ -715,11 +895,11 @@ export default function LoanCalculator() {
                       {fmt(r.remaining)}
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
               <tfoot className="bg-blue-50 dark:bg-blue-900/30 font-semibold border-t-2 border-blue-200 dark:border-blue-700/50">
                 <tr>
-                  <td colSpan={3} className="px-3 py-4 text-blue-700 dark:text-blue-300 uppercase text-xs tracking-wide">TOTALS</td>
+                  <td colSpan={4} className="px-3 py-4 text-blue-700 dark:text-blue-300 uppercase text-xs tracking-wide">TOTALS</td>
                   <td className="px-3 py-4 text-gray-800 dark:text-gray-200 font-mono">{fmt(totals.emi)}</td>
                   <td colSpan={3}></td>
                   <td className="px-3 py-4 text-green-600 dark:text-green-400 font-mono">{fmt(totals.prin)}</td>
