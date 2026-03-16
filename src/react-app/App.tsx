@@ -123,8 +123,8 @@ const SmallInp: React.FC<SmallInpProps> = ({ val, onChange, ...rest }) => (
 );
 
 export default function LoanCalculator() {
-  const [currency, setCurrency] = useState(getUserCurrency());
-  const [locale, setLocale] = useState(getUserLocale());
+  const [currency] = useState(getUserCurrency());
+  const [locale] = useState(getUserLocale());
   const [isDark, setIsDark] = useState(false);
   const [data, setData] = useState<LoanData>(DEFAULTS);
   const [loaded, setLoaded] = useState(false);
@@ -243,7 +243,6 @@ export default function LoanCalculator() {
       const rows = schedule.map(r => {
         const isCurrent = r.m === currentMonth;
         const isPaid = r.m < currentMonth;
-        const isPending = r.m > currentMonth;
         const status = r.emi === 0 ? '-' : isPaid ? 'Paid' : isCurrent ? 'Current' : 'Pending';
 
         return [
