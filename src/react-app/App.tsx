@@ -91,7 +91,7 @@ export default function LoanCalculator() {
   const [showDisp, setShowDisp] = useState(false);
   const [newEmi, setNewEmi] = useState({ fromMonth: 1, amount: '' });
   const [showEmi, setShowEmi] = useState(false);
-  const [newLump, setNewLump] = useState({ month: 1, amount: '' });
+  const [newLump, setNewLump] = useState({ month: 0, amount: '' });
   const [showLump, setShowLump] = useState(false);
 
   const activeLoan = loans.find(l => l.id === activeTabId);
@@ -215,7 +215,9 @@ export default function LoanCalculator() {
   };
 
   const schedule = useMemo<ScheduleRow[]>(() => {
-    const { principal: p, rate, years: y, startDate: sd, dispersals: ds, customEmis: ces, lumpSums: ls } = data;
+    const { principal: totalPrincipal, rate, years: y, startDate: sd, dispersals: ds, customEmis: ces, lumpSums: ls } = data;
+    const downPayment = ls.filter(l => l.month === 0).reduce((sum, l) => sum + l.amount, 0);
+    const loanPrincipal = Math.max(0, totalPrincipal - downPayment);
     const mr = rate / 100 / 12, tm = y * 12;
     const rows: ScheduleRow[] = [], sds = [...ds].sort((a,b) => a.month - b.month);
     let di = 0, rem = 0, cd = 0;
@@ -227,7 +229,7 @@ export default function LoanCalculator() {
     let sr = 0, sdi = 0;
     for (let m = 1; m <= tm; m++) {
       let da = 0;
-      if (sdi < sds.length && sds[sdi].month === m) { da = p * sds[sdi].pct / 100; sr += da; sdi++; }
+      if (sdi < sds.length && sds[sdi].month === m) { da = loanPrincipal * sds[sdi].pct / 100; sr += da; sdi++; }
       if (sr <= 0) { std.push({ rem: 0, int: 0 }); continue; }
       const rm = tm - m + 1, se = mr === 0 ? sr / rm : sr * mr * Math.pow(1+mr,rm) / (Math.pow(1+mr,rm)-1);
       const ip = sr * mr; let pp = se - ip; if (pp > sr) pp = sr; sr = Math.max(0, sr - pp);
@@ -238,7 +240,7 @@ export default function LoanCalculator() {
     for (let m = 1; m <= tm; m++) {
       const d = new Date(sd); d.setMonth(d.getMonth() + m - 1);
       let da = 0, dp = 0;
-      if (di < sds.length && sds[di].month === m) { dp = sds[di].pct; da = p * dp / 100; rem += da; cd += da; di++; }
+      if (di < sds.length && sds[di].month === m) { dp = sds[di].pct; da = loanPrincipal * dp / 100; rem += da; cd += da; di++; }
       if (rem <= 0) { rows.push({ m, date: d.toLocaleDateString(locale, { year: 'numeric', month: 'short' }), disbAmt: da, disbPct: dp, emi: 0, prinPay: 0, intPay: 0, remaining: 0, cumDisbursed: cd, payType: 'none', stdEmi: 0, customEmiAmt: null, lumpAmt: null, interestSaved: 0 }); continue; }
 
       const rm = tm - m + 1, se = mr === 0 ? rem / rm : rem * mr * Math.pow(1+mr,rm) / (Math.pow(1+mr,rm)-1);
@@ -260,7 +262,7 @@ export default function LoanCalculator() {
 
   const addDisp = () => { if (newDisp.month<1||newDisp.month>data.years*12||newDisp.pct<=0) return; updateData({ dispersals: [...data.dispersals.filter(x=>x.month!==newDisp.month), newDisp] }); setNewDisp({ month:1, pct:100 }); setShowDisp(false); };
   const addCEmi = () => { const a=parseFloat(newEmi.amount); if (!a||a<=0) return; updateData({ customEmis: [...data.customEmis.filter(e=>e.fromMonth!==newEmi.fromMonth), { fromMonth:newEmi.fromMonth, amount:a }].sort((a,b)=>a.fromMonth-b.fromMonth) }); setNewEmi({ fromMonth:1, amount:'' }); setShowEmi(false); };
-  const addLS = () => { const a=parseFloat(newLump.amount); if (!a||a<=0) return; updateData({ lumpSums: [...data.lumpSums.filter(l=>l.month!==newLump.month), { month:newLump.month, amount:a }].sort((a,b)=>a.month-b.month) }); setNewLump({ month:1, amount:'' }); setShowLump(false); };
+  const addLS = () => { const a=parseFloat(newLump.amount); const m = newLump.month; if (!a||a<=0 || m<0) return; updateData({ lumpSums: [...data.lumpSums.filter(l=>l.month!==m), { month:m, amount:a }].sort((a,b)=>a.month-b.month) }); setNewLump({ month:0, amount:'' }); setShowLump(false); };
 
   if (!loaded) return <div className="min-h-screen bg-gradient-to-br from-slate-100 to-blue-50 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center"><div className="text-blue-500 text-lg">Loading...</div></div>;
 
@@ -352,21 +354,21 @@ export default function LoanCalculator() {
             <summary className="cursor-pointer text-sm font-semibold text-gray-800 dark:text-gray-100 mb-2">Disbursements ({data.dispersals.length})</summary>
             <div className="flex flex-wrap gap-2 mb-2">{data.dispersals.sort((a,b)=>a.month-b.month).map(d=><span key={d.month} className="px-2 py-1 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded-full text-xs">M{d.month}: {d.pct}%<button onClick={()=>updateData({dispersals:data.dispersals.filter(x=>x.month!==d.month)})} className="ml-1 hover:text-red-600">×</button></span>)}</div>
             {!showDisp?<button onClick={()=>setShowDisp(true)} className="px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs">+ Add</button>:
-            <div className="flex gap-2"><input type="number" className="w-20 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Month" value={newDisp.month} onChange={e=>setNewDisp({...newDisp,month:+e.target.value})}/><input type="number" className="w-20 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="%" value={newDisp.pct} onChange={e=>setNewDisp({...newDisp,pct:+e.target.value})}/><button onClick={addDisp} className="px-3 py-1 bg-blue-500 text-white rounded text-xs">Add</button><button onClick={()=>setShowDisp(false)} className="px-2 py-1 bg-red-500/20 text-red-600 rounded text-xs">✕</button></div>}
+            <div className="flex gap-2"><input type="number" className="w-20 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Month" value={newDisp.month} onChange={e=>setNewDisp({...newDisp,month:+e.target.value})} onKeyDown={e => { if (e.key === 'Enter') addDisp(); }}/><input type="number" className="w-20 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="%" value={newDisp.pct} onChange={e=>setNewDisp({...newDisp,pct:+e.target.value})} onKeyDown={e => { if (e.key === 'Enter') addDisp(); }}/><button onClick={addDisp} className="px-3 py-1 bg-blue-500 text-white rounded text-xs">Add</button><button onClick={()=>setShowDisp(false)} className="px-2 py-1 bg-red-500/20 text-red-600 rounded text-xs">✕</button></div>}
           </details>
 
           <details className="mb-3">
             <summary className="cursor-pointer text-sm font-semibold text-gray-800 dark:text-gray-100 mb-2">Custom EMI ({data.customEmis.length})</summary>
             <div className="flex flex-wrap gap-2 mb-2">{data.customEmis.map(e=><span key={e.fromMonth} className="px-2 py-1 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded-full text-xs">M{e.fromMonth}: {fmt(e.amount)}<button onClick={()=>updateData({customEmis:data.customEmis.filter(x=>x.fromMonth!==e.fromMonth)})} className="ml-1 hover:text-red-600">×</button></span>)}</div>
             {!showEmi?<button onClick={()=>setShowEmi(true)} className="px-3 py-1.5 bg-purple-500 text-white rounded-lg text-xs">+ Add</button>:
-            <div className="flex gap-2"><input type="number" className="w-20 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Month" value={newEmi.fromMonth} onChange={e=>setNewEmi({...newEmi,fromMonth:+e.target.value})}/><input type="number" className="w-24 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Amount" value={newEmi.amount} onChange={e=>setNewEmi({...newEmi,amount:e.target.value})}/><button onClick={addCEmi} className="px-3 py-1 bg-purple-500 text-white rounded text-xs">Add</button><button onClick={()=>setShowEmi(false)} className="px-2 py-1 bg-red-500/20 text-red-600 rounded text-xs">✕</button></div>}
+            <div className="flex gap-2"><input type="number" className="w-20 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Month" value={newEmi.fromMonth} onChange={e=>setNewEmi({...newEmi,fromMonth:+e.target.value})} onKeyDown={e => { if (e.key === 'Enter') addCEmi(); }}/><input type="number" className="w-24 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Amount" value={newEmi.amount} onChange={e=>setNewEmi({...newEmi,amount:e.target.value})} onKeyDown={e => { if (e.key === 'Enter') addCEmi(); }}/><button onClick={addCEmi} className="px-3 py-1 bg-purple-500 text-white rounded text-xs">Add</button><button onClick={()=>setShowEmi(false)} className="px-2 py-1 bg-red-500/20 text-red-600 rounded text-xs">✕</button></div>}
           </details>
 
           <details>
             <summary className="cursor-pointer text-sm font-semibold text-gray-800 dark:text-gray-100 mb-2">Lump Sum ({data.lumpSums.length})</summary>
             <div className="flex flex-wrap gap-2 mb-2">{data.lumpSums.map(l=><span key={l.month} className="px-2 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded-full text-xs">M{l.month}: {fmt(l.amount)}<button onClick={()=>updateData({lumpSums:data.lumpSums.filter(x=>x.month!==l.month)})} className="ml-1 hover:text-red-600">×</button></span>)}</div>
             {!showLump?<button onClick={()=>setShowLump(true)} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs">+ Add</button>:
-            <div className="flex gap-2"><input type="number" className="w-20 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Month" value={newLump.month} onChange={e=>setNewLump({...newLump,month:+e.target.value})}/><input type="number" className="w-24 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Amount" value={newLump.amount} onChange={e=>setNewLump({...newLump,amount:e.target.value})}/><button onClick={addLS} className="px-3 py-1 bg-amber-500 text-white rounded text-xs">Add</button><button onClick={()=>setShowLump(false)} className="px-2 py-1 bg-red-500/20 text-red-600 rounded text-xs">✕</button></div>}
+            <div className="flex gap-2"><input type="number" className="w-20 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Month" value={newLump.month} onChange={e=>setNewLump({...newLump,month:+e.target.value})} min="0" onKeyDown={e => { if (e.key === 'Enter') addLS(); }}/><input type="number" className="w-24 px-2 py-1 bg-white dark:bg-slate-700 border rounded text-sm" placeholder="Amount" value={newLump.amount} onChange={e=>setNewLump({...newLump,amount:e.target.value})} onKeyDown={e => { if (e.key === 'Enter') addLS(); }}/><button onClick={addLS} className="px-3 py-1 bg-amber-500 text-white rounded text-xs">Add</button><button onClick={()=>setShowLump(false)} className="px-2 py-1 bg-red-500/20 text-red-600 rounded text-xs">✕</button></div>}
           </details>
         </div>
 
