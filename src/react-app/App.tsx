@@ -43,6 +43,7 @@ interface ScheduleRow {
   stdEmi: number;
   customEmiAmt: number | null;
   lumpAmt: number | null;
+  interestSaved: number;
 }
 
 interface Toast {
@@ -236,6 +237,7 @@ export default function LoanCalculator() {
         'Lump Sum',
         'Principal',
         'Interest',
+        'Interest Saved',
         'Balance'
       ];
 
@@ -243,6 +245,7 @@ export default function LoanCalculator() {
       const rows = schedule.map(r => {
         const isCurrent = r.m === currentMonth;
         const isPaid = r.m < currentMonth;
+        const isPending = r.m > currentMonth;
         const status = r.emi === 0 ? '-' : isPaid ? 'Paid' : isCurrent ? 'Current' : 'Pending';
 
         return [
@@ -257,6 +260,7 @@ export default function LoanCalculator() {
           r.lumpAmt ? r.lumpAmt.toFixed(2) : '',
           r.prinPay > 0 ? r.prinPay.toFixed(2) : '',
           r.intPay > 0 ? r.intPay.toFixed(2) : '',
+          r.interestSaved > 0 ? r.interestSaved.toFixed(2) : '',
           r.remaining.toFixed(2)
         ];
       });
@@ -274,6 +278,7 @@ export default function LoanCalculator() {
         '',
         totals.prin.toFixed(2),
         totals.int.toFixed(2),
+        totals.saved.toFixed(2),
         ''
       ];
 
@@ -426,6 +431,44 @@ export default function LoanCalculator() {
     };
     const getLS = (m: number): number | null => lumpSums.find(l => l.month === m)?.amount ?? null;
 
+    // First pass: calculate standard schedule (no custom EMI or lump sum)
+    const standardSchedule: { remaining: number; intPay: number }[] = [];
+    let stdRemaining = 0;
+    let stdDispIdx = 0;
+    let stdCumDisbursed = 0;
+    
+    for (let m = 1; m <= totalMonths; m++) {
+      let disbAmt = 0;
+      if (stdDispIdx < sortedDisp.length && sortedDisp[stdDispIdx].month === m) {
+        disbAmt = (principal * sortedDisp[stdDispIdx].pct) / 100;
+        stdRemaining += disbAmt;
+        stdCumDisbursed += disbAmt;
+        stdDispIdx++;
+      }
+      
+      if (stdRemaining <= 0) {
+        standardSchedule.push({ remaining: 0, intPay: 0 });
+        continue;
+      }
+      
+      const remMonths = totalMonths - m + 1;
+      const stdEmi = mRate === 0 ? stdRemaining / remMonths : stdRemaining * mRate * Math.pow(1 + mRate, remMonths) / (Math.pow(1 + mRate, remMonths) - 1);
+      const intPay = stdRemaining * mRate;
+      let prinPay = stdEmi - intPay;
+      if (prinPay > stdRemaining) prinPay = stdRemaining;
+      stdRemaining = Math.max(0, stdRemaining - prinPay);
+      
+      standardSchedule.push({ remaining: stdRemaining, intPay });
+      
+      if (stdRemaining <= 0.01) {
+        for (let rest = m + 1; rest <= totalMonths; rest++) {
+          standardSchedule.push({ remaining: 0, intPay: 0 });
+        }
+        break;
+      }
+    }
+
+    // Second pass: calculate actual schedule with custom EMI/lump sum
     for (let m = 1; m <= totalMonths; m++) {
       const d = new Date(startDate);
       d.setMonth(d.getMonth() + m - 1);
@@ -436,7 +479,7 @@ export default function LoanCalculator() {
         remaining += disbAmt; cumDisbursed += disbAmt; dispIdx++;
       }
       if (remaining <= 0) { 
-        rows.push({ m, date: d.toLocaleDateString(locale, { year: 'numeric', month: 'short' }), disbAmt, disbPct, emi: 0, prinPay: 0, intPay: 0, remaining: 0, cumDisbursed, payType: 'none', stdEmi: 0, customEmiAmt: null, lumpAmt: null }); 
+        rows.push({ m, date: d.toLocaleDateString(locale, { year: 'numeric', month: 'short' }), disbAmt, disbPct, emi: 0, prinPay: 0, intPay: 0, remaining: 0, cumDisbursed, payType: 'none', stdEmi: 0, customEmiAmt: null, lumpAmt: null, interestSaved: 0 }); 
         continue; 
       }
 
@@ -453,12 +496,17 @@ export default function LoanCalculator() {
       if (prinPay > remaining) prinPay = remaining;
       const emi = intPay + prinPay;
       remaining = Math.max(0, remaining - prinPay);
-      rows.push({ m, date: d.toLocaleDateString(locale, { year: 'numeric', month: 'short' }), disbAmt, disbPct, emi, prinPay, intPay, remaining, cumDisbursed, payType, stdEmi, customEmiAmt, lumpAmt });
+      
+      // Calculate interest saved
+      const stdIntPay = standardSchedule[m - 1]?.intPay || 0;
+      const interestSaved = payType === 'std' ? 0 : Math.max(0, stdIntPay - intPay);
+      
+      rows.push({ m, date: d.toLocaleDateString(locale, { year: 'numeric', month: 'short' }), disbAmt, disbPct, emi, prinPay, intPay, remaining, cumDisbursed, payType, stdEmi, customEmiAmt, lumpAmt, interestSaved });
 
       if (remaining <= 0.01) {
         for (let rest = m + 1; rest <= totalMonths; rest++) {
           const rd = new Date(startDate); rd.setMonth(rd.getMonth() + rest - 1);
-          rows.push({ m: rest, date: rd.toLocaleDateString(locale, { year: 'numeric', month: 'short' }), disbAmt: 0, disbPct: 0, emi: 0, prinPay: 0, intPay: 0, remaining: 0, cumDisbursed, payType: 'none', stdEmi: 0, customEmiAmt: null, lumpAmt: null });
+          rows.push({ m: rest, date: rd.toLocaleDateString(locale, { year: 'numeric', month: 'short' }), disbAmt: 0, disbPct: 0, emi: 0, prinPay: 0, intPay: 0, remaining: 0, cumDisbursed, payType: 'none', stdEmi: 0, customEmiAmt: null, lumpAmt: null, interestSaved: 0 });
         }
         break;
       }
@@ -470,8 +518,9 @@ export default function LoanCalculator() {
     disbursed: Math.max(a.disbursed, r.cumDisbursed), 
     emi: a.emi + r.emi, 
     prin: a.prin + r.prinPay, 
-    int: a.int + r.intPay 
-  }), { disbursed: 0, emi: 0, prin: 0, int: 0 }), [schedule]);
+    int: a.int + r.intPay,
+    saved: a.saved + r.interestSaved
+  }), { disbursed: 0, emi: 0, prin: 0, int: 0, saved: 0 }), [schedule]);
   
   const paidOffMonth = schedule.find(r => r.remaining <= 0.01 && r.emi > 0)?.m;
   const currentMonth = getCurrentMonth();
@@ -782,18 +831,19 @@ export default function LoanCalculator() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8 animate-[fadeUp_0.5s_ease-out]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-6 mb-8 animate-[fadeUp_0.5s_ease-out]">
           {[
             { label: 'Total Disbursed', val: totals.disbursed, colorLight: 'blue-600', colorDark: 'blue-400' },
             { label: 'Total Interest', val: totals.int, colorLight: 'amber-600', colorDark: 'amber-400' },
             { label: 'Total Principal Paid', val: totals.prin, colorLight: 'green-600', colorDark: 'green-400' },
+            { label: 'Interest Saved', val: totals.saved, colorLight: 'emerald-600', colorDark: 'emerald-400' },
             { label: 'Paid Till Now', val: paidTillNow, colorLight: 'cyan-600', colorDark: 'cyan-400' },
             { label: 'Still Pending', val: pendingAmount, colorLight: 'rose-600', colorDark: 'rose-400' },
           ].map(({ label, val, colorLight, colorDark }) => (
             <div key={label} className="relative overflow-hidden bg-white/90 dark:bg-slate-800/50 backdrop-blur-xl border border-gray-200 dark:border-slate-700 rounded-2xl shadow-lg dark:shadow-xl p-6 transition-colors duration-300">
               <div className={`absolute top-0 left-0 right-0 h-1 bg-${colorLight} dark:bg-${colorDark}`} />
               <div className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">{label}</div>
-              <div className={`text-3xl font-bold text-${colorLight} dark:text-${colorDark} font-mono`}>{fmt(val)}</div>
+              <div className={`text-2xl lg:text-3xl font-bold text-${colorLight} dark:text-${colorDark} font-mono`}>{fmt(val)}</div>
             </div>
           ))}
         </div>
@@ -826,7 +876,7 @@ export default function LoanCalculator() {
             <table className="w-full text-sm">
               <thead className="bg-blue-50 dark:bg-blue-900/30 sticky top-0 z-10">
                 <tr>
-                  {['Month', 'Date', 'Status', 'Disbursement', 'EMI Paid', 'Std. EMI', 'Custom EMI', 'Lump Sum', 'Principal', 'Interest', 'Balance'].map(h => (
+                  {['Month', 'Date', 'Status', 'Disbursement', 'EMI Paid', 'Std. EMI', 'Custom EMI', 'Lump Sum', 'Principal', 'Interest', 'Int. Saved', 'Balance'].map(h => (
                     <th key={h} className="px-3 py-4 text-left font-semibold text-xs text-blue-700 dark:text-blue-300 uppercase tracking-wide border-b-2 border-blue-200 dark:border-blue-700/50 whitespace-nowrap">
                       {h}
                     </th>
@@ -890,6 +940,9 @@ export default function LoanCalculator() {
                     </td>
                     <td className="px-3 py-3 text-green-600 dark:text-green-400 font-mono whitespace-nowrap">{r.prinPay > 0 ? fmt(r.prinPay) : '—'}</td>
                     <td className="px-3 py-3 text-amber-600 dark:text-amber-400 font-mono whitespace-nowrap">{r.intPay > 0 ? fmt(r.intPay) : '—'}</td>
+                    <td className="px-3 py-3 text-emerald-600 dark:text-emerald-400 font-mono whitespace-nowrap font-semibold">
+                      {r.interestSaved > 0 ? fmt(r.interestSaved) : '—'}
+                    </td>
                     <td className={`px-3 py-3 font-mono whitespace-nowrap ${r.remaining < 1 ? 'text-green-600 dark:text-green-400 font-bold' : 'text-gray-700 dark:text-gray-300'}`}>
                       {fmt(r.remaining)}
                     </td>
@@ -903,6 +956,7 @@ export default function LoanCalculator() {
                   <td colSpan={3}></td>
                   <td className="px-3 py-4 text-green-600 dark:text-green-400 font-mono">{fmt(totals.prin)}</td>
                   <td className="px-3 py-4 text-amber-600 dark:text-amber-400 font-mono">{fmt(totals.int)}</td>
+                  <td className="px-3 py-4 text-emerald-600 dark:text-emerald-400 font-mono">{fmt(totals.saved)}</td>
                   <td className="px-3 py-4 text-gray-500 dark:text-gray-400">—</td>
                 </tr>
               </tfoot>
