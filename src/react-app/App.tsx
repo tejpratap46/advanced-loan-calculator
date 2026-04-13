@@ -74,17 +74,6 @@ const getCurrencySymbol = (c: string): string => {
 };
 
 /* ── Shared input class ─────────────────────────────────────────────────── */
-const inputCls =
-  'w-full px-3 py-2 rounded-lg text-sm outline-none transition-all ' +
-  'bg-white/5 border border-white/10 text-gray-100 placeholder-gray-500 ' +
-  'focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 focus:bg-white/8 ' +
-  'dark:bg-white/5 dark:border-white/10 dark:text-gray-100 ' +
-  /* light-mode overrides */
-  'light:bg-gray-50 light:border-gray-200 light:text-gray-800';
-
-const lightInputCls =
-  'w-full px-3 py-2 rounded-lg text-sm outline-none transition-all ' +
-  'border focus:ring-2 focus:ring-sky-400/30';
 
 export default function LoanCalculator() {
   const [currency] = useState(getUserCurrency());
@@ -620,14 +609,13 @@ export default function LoanCalculator() {
 
 /* ── Sub-components ─────────────────────────────────────────────────────── */
 
-function AdvSection({ title, count, accentClass, isDark, tags, showForm, onAdd, onClose, formContent }: {
+function AdvSection({ title, count, accentClass, isDark, tags, showForm, onAdd, formContent }: {
   title: string; count: number; accentClass: string; isDark: boolean;
   tags: { label: string; color: string; onRemove: () => void }[];
   showForm: boolean; onAdd: () => void; onClose: () => void;
   formContent: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const subtext = isDark ? 'text-gray-500' : 'text-gray-400';
   return (
     <div>
       <button onClick={() => setOpen(p => !p)}
@@ -681,7 +669,7 @@ function StrInput({ placeholder, value, onChange, onEnter, isDark }: {
   return <input type="number" placeholder={placeholder} value={value} onChange={e => onChange(e.target.value)} onKeyDown={e => e.key === 'Enter' && onEnter()} className={cls} />;
 }
 
-function ActionBtn({ onClick, color, isDark, children }: {
+function ActionBtn({ onClick, color, children }: {
   onClick: () => void; color: 'sky' | 'violet' | 'amber'; isDark: boolean; children: React.ReactNode;
 }) {
   const colors = {
