@@ -3,6 +3,7 @@ import { Calculator, Sun, Moon, Share2, Download, Plus, X, Edit2, Check } from '
 
 const STORAGE_KEY = 'loan-calc-loans';
 const THEME_KEY = 'loan-calc-theme';
+const FIREBASE_CONFIG_KEY = 'loan-calc-firebase-config';
 
 interface Dispersal { month: number; pct: number; }
 interface CustomEmi { fromMonth: number; amount: number; }
@@ -88,6 +89,9 @@ export default function LoanCalculator() {
   const [copied, setCopied] = useState(false);
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
 
   const [newDisp, setNewDisp] = useState({ month: 1, pct: 100 });
   const [showDisp, setShowDisp] = useState(false);
@@ -152,6 +156,78 @@ export default function LoanCalculator() {
     } else setShowShareModal(true);
   };
 
+  const loadFirebaseSdk = async () => {
+    const ensureScript = (src: string) => new Promise<void>((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+    await ensureScript('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
+    await ensureScript('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js');
+    await ensureScript('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js');
+  };
+
+  const getFirebaseConfig = () => {
+    const envCfg = (window as any).__FIREBASE_CONFIG__;
+    if (envCfg) return envCfg;
+    const stored = localStorage.getItem(FIREBASE_CONFIG_KEY);
+    return stored ? JSON.parse(stored) : null;
+  };
+
+  const ensureFirebase = async () => {
+    await loadFirebaseSdk();
+    const cfg = getFirebaseConfig();
+    if (!cfg) throw new Error('Missing Firebase config');
+    const fb = (window as any).firebase;
+    if (!fb.apps.length) fb.initializeApp(cfg);
+    return fb;
+  };
+
+  const signInWithGoogle = async () => {
+    try {
+      const fb = await ensureFirebase();
+      const provider = new fb.auth.GoogleAuthProvider();
+      await fb.auth().signInWithPopup(provider);
+      showToast('Signed in', 'success');
+    } catch {
+      showToast('Google login failed', 'error');
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      const fb = await ensureFirebase();
+      await fb.auth().signOut();
+      showToast('Signed out', 'success');
+    } catch {
+      showToast('Sign out failed', 'error');
+    }
+  };
+
+  const syncToFirestore = async () => {
+    setSyncBusy(true);
+    try {
+      const fb = await ensureFirebase();
+      const user = fb.auth().currentUser;
+      if (!user) throw new Error('No user');
+      await fb.firestore().collection('loanCalculatorUsers').doc(user.uid).set({
+        loans,
+        activeId: activeTabId,
+        updatedAt: new Date().toISOString(),
+        email: user.email || null,
+      }, { merge: true });
+      showToast('Synced to Firestore', 'success');
+    } catch {
+      showToast('Sync failed', 'error');
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
   const downloadCSV = () => {
     try {
       const h = ['Month', 'Date', 'Status', 'Disbursement', 'Disb %', 'EMI', 'Std EMI', 'Custom EMI', 'Lump', 'Principal', 'Interest', 'Int Saved', 'Balance'];
@@ -213,6 +289,23 @@ export default function LoanCalculator() {
       document.documentElement.classList[isDark ? 'add' : 'remove']('dark');
     } catch { /* noop */ }
   }, [isDark, loaded]);
+
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    const init = async () => {
+      try {
+        const fb = await ensureFirebase();
+        unsub = fb.auth().onAuthStateChanged((u: any) => {
+          setUserEmail(u?.email || null);
+          setAuthReady(true);
+        });
+      } catch {
+        setAuthReady(true);
+      }
+    };
+    init();
+    return () => { if (unsub) unsub(); };
+  }, []);
 
   const getCurrentMonth = () => {
     const s = new Date(data.startDate), n = new Date();
@@ -372,6 +465,18 @@ export default function LoanCalculator() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {authReady && (userEmail ? (
+              <>
+                <button onClick={syncToFirestore} disabled={syncBusy} className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${isDark ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'}`}>
+                  {syncBusy ? 'Syncing…' : 'Sync'}
+                </button>
+                <button onClick={signOut} className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${isDark ? 'bg-white/[0.04] hover:bg-white/[0.08] text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}>{userEmail}</button>
+              </>
+            ) : (
+              <button onClick={signInWithGoogle} className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${isDark ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
+                Google Login
+              </button>
+            ))}
             {/* Save indicator */}
             <div className={`hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg ${isDark ? 'bg-white/[0.04]' : 'bg-gray-100'} ${saveStatus === 'saving' ? 'text-sky-400' : 'text-emerald-400'}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${saveStatus === 'saving' ? 'bg-sky-400 animate-pulse' : 'bg-emerald-400'}`} />
