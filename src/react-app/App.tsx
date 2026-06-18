@@ -17,7 +17,7 @@ const FIREBASE_CONFIG_KEY = "loan-calc-firebase-config";
 
 interface Dispersal {
   month: number;
-  pct: number;
+  amount: number;
 }
 interface CustomEmi {
   fromMonth: number;
@@ -48,7 +48,6 @@ interface ScheduleRow {
   m: number;
   date: string;
   disbAmt: number;
-  disbPct: number;
   emi: number;
   prinPay: number;
   intPay: number;
@@ -110,6 +109,32 @@ const getCurrencySymbol = (c: string): string => {
   return s[c] || c;
 };
 
+const migrateLoans = (loans: Loan[]): Loan[] => {
+  return loans.map((loan) => {
+    const data = loan.data;
+    if (data.dispersals && data.dispersals.length > 0) {
+      const migratedDispersals = (data.dispersals as unknown[]).map((d) => {
+        const item = d as { month: number; pct?: number; amount?: number };
+        if (item.pct !== undefined && item.amount === undefined) {
+          return {
+            month: item.month,
+            amount: (data.principal * item.pct) / 100,
+          } as Dispersal;
+        }
+        return item as Dispersal;
+      });
+      return {
+        ...loan,
+        data: {
+          ...data,
+          dispersals: migratedDispersals,
+        },
+      };
+    }
+    return loan;
+  });
+};
+
 /* ── Shared input class ─────────────────────────────────────────────────── */
 
 export default function LoanCalculator() {
@@ -128,12 +153,16 @@ export default function LoanCalculator() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [syncModalData, setSyncModalData] = useState<{
+    serverLoans: Loan[];
+    serverActiveId: string;
+  } | null>(null);
 
   const [newDisp, setNewDisp] = useState<{
     month: number;
-    pct: number;
+    amount: number;
     originalMonth?: number;
-  }>({ month: 1, pct: 100 });
+  }>({ month: 1, amount: 0 });
   const [showDisp, setShowDisp] = useState(false);
   const [newEmi, setNewEmi] = useState<{
     fromMonth: number;
@@ -186,6 +215,9 @@ export default function LoanCalculator() {
   const deleteLoan = (id: string) => {
     if (loans.length <= 1) {
       showToast("Cannot delete last loan", "error");
+      return;
+    }
+    if (!window.confirm("Are you sure you want to close this loan tab?")) {
       return;
     }
     const i = loans.findIndex((l) => l.id === id);
@@ -301,8 +333,41 @@ export default function LoanCalculator() {
     }
   };
 
-  const syncToFirestore = async () => {
+  const initiateSync = async () => {
     setSyncBusy(true);
+    try {
+      const fb = await ensureFirebase();
+      const user = fb.auth().currentUser;
+      if (!user) throw new Error("No user");
+
+      const doc = await fb
+        .firestore()
+        .collection("loanCalculatorUsers")
+        .doc(user.uid)
+        .get();
+      if (doc.exists && doc.data()?.loans?.length > 0) {
+        const d = doc.data();
+        setSyncModalData({
+          serverLoans: migrateLoans(d.loans),
+          serverActiveId: d.activeId,
+        });
+      } else {
+        await performSyncPush();
+      }
+    } catch {
+      showToast("Sync check failed", "error");
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const performSyncPush = async (
+    overrideLoans?: Loan[],
+    overrideActiveId?: string,
+  ) => {
+    setSyncBusy(true);
+    const lns = overrideLoans || loans;
+    const actId = overrideActiveId || activeTabId;
     try {
       const fb = await ensureFirebase();
       const user = fb.auth().currentUser;
@@ -313,8 +378,8 @@ export default function LoanCalculator() {
         .doc(user.uid)
         .set(
           {
-            loans,
-            activeId: activeTabId,
+            loans: lns,
+            activeId: actId,
             updatedAt: new Date().toISOString(),
             email: user.email || null,
           },
@@ -325,6 +390,31 @@ export default function LoanCalculator() {
       showToast("Sync failed", "error");
     } finally {
       setSyncBusy(false);
+      setSyncModalData(null);
+    }
+  };
+
+  const handleSyncChoice = async (choice: "local" | "server" | "both") => {
+    if (!syncModalData) return;
+
+    if (choice === "local") {
+      await performSyncPush();
+    } else if (choice === "server") {
+      setLoans(syncModalData.serverLoans);
+      setActiveTabId(
+        syncModalData.serverActiveId || syncModalData.serverLoans[0]?.id || "",
+      );
+      setSyncModalData(null);
+      showToast("Loaded from server", "success");
+    } else if (choice === "both") {
+      const mergedLoans = syncModalData.serverLoans.map((sl) => ({
+        ...sl,
+        id: Date.now().toString() + Math.random().toString(36).substring(2, 7),
+        name: `${sl.name} (Server)`,
+      }));
+      const combined = [...loans, ...mergedLoans];
+      setLoans(combined);
+      await performSyncPush(combined, activeTabId);
     }
   };
 
@@ -335,7 +425,6 @@ export default function LoanCalculator() {
         "Date",
         "Status",
         "Disbursement",
-        "Disb %",
         "EMI",
         "Std EMI",
         "Custom EMI",
@@ -360,7 +449,6 @@ export default function LoanCalculator() {
           r.date,
           s,
           r.disbAmt || "",
-          r.disbPct || "",
           r.emi || "",
           r.stdEmi || "",
           r.customEmiAmt || "",
@@ -376,7 +464,6 @@ export default function LoanCalculator() {
         "",
         "",
         totals.d,
-        "",
         totals.e,
         "",
         "",
@@ -423,7 +510,7 @@ export default function LoanCalculator() {
       if (hash) {
         const d = decode(hash);
         if (d?.loans?.length) {
-          setLoans(d.loans);
+          setLoans(migrateLoans(d.loans));
           setActiveTabId(d.activeId || d.loans[0].id);
           showToast("Loaded", "success");
         }
@@ -432,7 +519,7 @@ export default function LoanCalculator() {
         if (s) {
           const p = JSON.parse(s);
           if (p.loans?.length) {
-            setLoans(p.loans);
+            setLoans(migrateLoans(p.loans));
             setActiveTabId(p.activeId || p.loans[0].id);
           } else {
             setLoans([{ id: "1", name: "My Loan", data: DEFAULT_DATA }]);
@@ -514,7 +601,6 @@ export default function LoanCalculator() {
 
   const schedule = useMemo<ScheduleRow[]>(() => {
     const {
-      principal: totalPrincipal,
       rate,
       years: y,
       startDate: sd,
@@ -522,10 +608,6 @@ export default function LoanCalculator() {
       customEmis: ces,
       lumpSums: ls,
     } = data;
-    const downPayment = ls
-      .filter((l) => l.month === 0)
-      .reduce((sum, l) => sum + l.amount, 0);
-    const loanPrincipal = Math.max(0, totalPrincipal - downPayment);
     const mr = rate / 100 / 12,
       tm = y * 12;
     const rows: ScheduleRow[] = [],
@@ -546,7 +628,7 @@ export default function LoanCalculator() {
     for (let m = 1; m <= tm; m++) {
       let da = 0;
       if (sdi < sds.length && sds[sdi].month === m) {
-        da = (loanPrincipal * sds[sdi].pct) / 100;
+        da = sds[sdi].amount;
         sr += da;
         sdi++;
       }
@@ -573,11 +655,9 @@ export default function LoanCalculator() {
     for (let m = 1; m <= tm; m++) {
       const d = new Date(sd);
       d.setMonth(d.getMonth() + m - 1);
-      let da = 0,
-        dp = 0;
+      let da = 0;
       if (di < sds.length && sds[di].month === m) {
-        dp = sds[di].pct;
-        da = (loanPrincipal * dp) / 100;
+        da = sds[di].amount;
         rem += da;
         cd += da;
         di++;
@@ -590,7 +670,6 @@ export default function LoanCalculator() {
             month: "short",
           }),
           disbAmt: da,
-          disbPct: dp,
           emi: 0,
           prinPay: 0,
           intPay: 0,
@@ -626,7 +705,6 @@ export default function LoanCalculator() {
         m,
         date: d.toLocaleDateString(locale, { year: "numeric", month: "short" }),
         disbAmt: da,
-        disbPct: dp,
         emi,
         prinPay: pp,
         intPay: ip,
@@ -649,7 +727,6 @@ export default function LoanCalculator() {
               month: "short",
             }),
             disbAmt: 0,
-            disbPct: 0,
             emi: 0,
             prinPay: 0,
             intPay: 0,
@@ -696,10 +773,10 @@ export default function LoanCalculator() {
     if (
       newDisp.month < 1 ||
       newDisp.month > data.years * 12 ||
-      newDisp.pct <= 0
+      newDisp.amount <= 0
     )
       return;
-    const item = { month: newDisp.month, pct: newDisp.pct };
+    const item = { month: newDisp.month, amount: newDisp.amount };
     updateData({
       dispersals: [
         ...data.dispersals.filter(
@@ -708,7 +785,7 @@ export default function LoanCalculator() {
         item,
       ],
     });
-    setNewDisp({ month: 1, pct: 100 });
+    setNewDisp({ month: 1, amount: 0 });
     setShowDisp(false);
   };
   const addCEmi = () => {
@@ -851,6 +928,60 @@ export default function LoanCalculator() {
         </div>
       )}
 
+      {/* ── Sync Modal ────────────────────────────────────────────────────── */}
+      {syncModalData && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setSyncModalData(null)}
+        >
+          <div
+            className={`${card} max-w-md w-full p-6`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className={`text-base font-semibold ${heading}`}>
+                Sync Conflict
+              </h3>
+              <button
+                onClick={() => setSyncModalData(null)}
+                className={`p-1.5 rounded-lg hover:bg-white/10 ${subtext}`}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className={`text-sm mb-6 ${subtext}`}>
+              Server data exists. How would you like to resolve the sync?
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => handleSyncChoice("local")}
+                className="w-full px-4 py-3 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-sm font-semibold transition-colors"
+              >
+                Use Local Data (Overwrite Server)
+              </button>
+              <button
+                onClick={() => handleSyncChoice("server")}
+                className="w-full px-4 py-3 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl text-sm font-semibold transition-colors"
+              >
+                Use Server Data (Overwrite Local)
+              </button>
+              <button
+                onClick={() => handleSyncChoice("both")}
+                className="w-full px-4 py-3 bg-violet-500 hover:bg-violet-400 text-white rounded-xl text-sm font-semibold transition-colors"
+              >
+                Keep Both (Merge as new tabs)
+              </button>
+              <button
+                onClick={() => setSyncModalData(null)}
+                className={`w-full px-4 py-3 mt-2 rounded-xl text-sm font-semibold transition-colors ${isDark ? "bg-white/[0.06] hover:bg-white/10 text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between mb-8">
@@ -872,7 +1003,7 @@ export default function LoanCalculator() {
               (userEmail ? (
                 <>
                   <button
-                    onClick={syncToFirestore}
+                    onClick={initiateSync}
                     disabled={syncBusy}
                     className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${isDark ? "bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}
                   >
@@ -956,14 +1087,14 @@ export default function LoanCalculator() {
                   setEditingTabId(l.id);
                   setEditingName(l.name);
                 }}
-                className={`p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
+                className={`p-1 rounded-lg ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
               >
                 <Edit2 size={11} />
               </button>
               {loans.length > 1 && (
                 <button
                   onClick={() => deleteLoan(l.id)}
-                  className={`p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
+                  className={`p-1 rounded-lg ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
                 >
                   <X size={11} />
                 </button>
@@ -1104,7 +1235,7 @@ export default function LoanCalculator() {
               tags={data.dispersals
                 .sort((a, b) => a.month - b.month)
                 .map((d) => ({
-                  label: `M${d.month}: ${d.pct}%`,
+                  label: `M${d.month}: ${fmt(d.amount)}`,
                   color: isDark
                     ? "bg-sky-500/10 text-sky-300 border-sky-500/20"
                     : "bg-sky-50 text-sky-700 border-sky-200",
@@ -1121,7 +1252,7 @@ export default function LoanCalculator() {
                 }))}
               showForm={showDisp}
               onAdd={() => {
-                setNewDisp({ month: 1, pct: 100 });
+                setNewDisp({ month: 1, amount: 0 });
                 setShowDisp(true);
               }}
               onClose={() => setShowDisp(false)}
@@ -1135,9 +1266,9 @@ export default function LoanCalculator() {
                     isDark={isDark}
                   />
                   <NumInput
-                    placeholder="%"
-                    value={newDisp.pct}
-                    onChange={(v) => setNewDisp({ ...newDisp, pct: v })}
+                    placeholder="Amount"
+                    value={newDisp.amount}
+                    onChange={(v) => setNewDisp({ ...newDisp, amount: v })}
                     onEnter={addDisp}
                     isDark={isDark}
                   />
@@ -1147,7 +1278,7 @@ export default function LoanCalculator() {
                   <CancelBtn
                     onClick={() => {
                       setShowDisp(false);
-                      setNewDisp({ month: 1, pct: 100 });
+                      setNewDisp({ month: 1, amount: 0 });
                     }}
                     isDark={isDark}
                   />
