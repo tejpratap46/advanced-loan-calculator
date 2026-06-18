@@ -11,131 +11,34 @@ import {
   Check,
 } from "lucide-react";
 
-const STORAGE_KEY = "loan-calc-loans";
-const THEME_KEY = "loan-calc-theme";
-const FIREBASE_CONFIG_KEY = "loan-calc-firebase-config";
+// Types
+import { Loan, LoanData, ScheduleRow, Toast } from "./types";
 
-interface Dispersal {
-  month: number;
-  amount: number;
-}
-interface CustomEmi {
-  fromMonth: number;
-  amount: number;
-}
-interface LumpSum {
-  month: number;
-  amount: number;
-}
+// Constants
+import {
+  STORAGE_KEY,
+  THEME_KEY,
+  FIREBASE_CONFIG_KEY,
+  DEFAULT_DATA,
+} from "./utils/constants";
 
-interface LoanData {
-  principal: number;
-  rate: number;
-  years: number;
-  startDate: string;
-  dispersals: Dispersal[];
-  customEmis: CustomEmi[];
-  lumpSums: LumpSum[];
-}
+// Utilities
+import { getUserCurrency, getCurrencySymbol } from "./utils/currency";
+import { migrateLoans } from "./utils/migrations";
+import {
+  calculateSchedule,
+  calculateTotals,
+  getCurrentMonth,
+} from "./utils/calculations";
+import { generateCSV, downloadFile } from "./utils/export";
+import { decodeData, getShareUrl } from "./utils/share";
 
-interface Loan {
-  id: string;
-  name: string;
-  data: LoanData;
-}
-
-interface ScheduleRow {
-  m: number;
-  date: string;
-  disbAmt: number;
-  emi: number;
-  prinPay: number;
-  intPay: number;
-  remaining: number;
-  cumDisbursed: number;
-  payType: "none" | "std" | "custom" | "lump";
-  stdEmi: number;
-  customEmiAmt: number | null;
-  lumpAmt: number | null;
-  interestSaved: number;
-}
-
-interface Toast {
-  msg: string;
-  type: "save" | "reset" | "success" | "error";
-}
-
-const DEFAULT_DATA: LoanData = {
-  principal: 100000,
-  rate: 7.5,
-  years: 20,
-  startDate: new Date().toISOString().split("T")[0],
-  dispersals: [],
-  customEmis: [],
-  lumpSums: [],
-};
-
-const getUserCurrency = (): string => {
-  const locale = navigator.language || "en-US";
-  const map: { [key: string]: string } = {
-    "en-US": "USD",
-    "en-GB": "GBP",
-    "en-IN": "INR",
-    "en-AU": "AUD",
-    "en-CA": "CAD",
-    "de-DE": "EUR",
-    "fr-FR": "EUR",
-    "es-ES": "EUR",
-    "ja-JP": "JPY",
-    "zh-CN": "CNY",
-  };
-  if (map[locale]) return map[locale];
-  const lang = locale.split("-")[0];
-  const match = Object.keys(map).find((k) => k.startsWith(lang));
-  return match ? map[match] : "USD";
-};
-
-const getCurrencySymbol = (c: string): string => {
-  const s: { [k: string]: string } = {
-    USD: "$",
-    EUR: "€",
-    GBP: "£",
-    JPY: "¥",
-    INR: "₹",
-    AUD: "A$",
-    CAD: "C$",
-    CNY: "¥",
-  };
-  return s[c] || c;
-};
-
-const migrateLoans = (loans: Loan[]): Loan[] => {
-  return loans.map((loan) => {
-    const data = loan.data;
-    if (data.dispersals && data.dispersals.length > 0) {
-      const migratedDispersals = (data.dispersals as unknown[]).map((d) => {
-        const item = d as { month: number; pct?: number; amount?: number };
-        if (item.pct !== undefined && item.amount === undefined) {
-          return {
-            month: item.month,
-            amount: (data.principal * item.pct) / 100,
-          } as Dispersal;
-        }
-        return item as Dispersal;
-      });
-      return {
-        ...loan,
-        data: {
-          ...data,
-          dispersals: migratedDispersals,
-        },
-      };
-    }
-    return loan;
-  });
-};
-
-/* ── Shared input class ─────────────────────────────────────────────────── */
+// Components
+import { AdvSection } from "./components/ui/AdvSection";
+import { NumInput } from "./components/ui/NumInput";
+import { StrInput } from "./components/ui/StrInput";
+import { ActionBtn } from "./components/ui/ActionBtn";
+import { CancelBtn } from "./components/ui/CancelBtn";
 
 export default function LoanCalculator() {
   const [currency] = useState(getUserCurrency());
@@ -236,21 +139,11 @@ export default function LoanCalculator() {
     setEditingTabId(null);
   };
 
-  const encode = () =>
-    btoa(encodeURIComponent(JSON.stringify({ loans, activeId: activeTabId })));
-  const decode = (h: string) => {
-    try {
-      return JSON.parse(decodeURIComponent(atob(h)));
-    } catch {
-      return null;
-    }
-  };
-  const getShareUrl = () =>
-    `${window.location.origin}${window.location.pathname}#${encode()}`;
-
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(getShareUrl());
+      await navigator.clipboard.writeText(
+        getShareUrl({ loans, activeId: activeTabId }),
+      );
       setCopied(true);
       showToast("Copied!", "success");
       setTimeout(() => setCopied(false), 2000);
@@ -260,7 +153,7 @@ export default function LoanCalculator() {
   };
 
   const share = async () => {
-    const url = getShareUrl();
+    const url = getShareUrl({ loans, activeId: activeTabId });
     if (navigator.share) {
       try {
         await navigator.share({ title: "Loan Calculator", url });
@@ -420,84 +313,9 @@ export default function LoanCalculator() {
 
   const downloadCSV = () => {
     try {
-      const h = [
-        "Month",
-        "Date",
-        "Status",
-        "Disbursement",
-        "EMI",
-        "Std EMI",
-        "Custom EMI",
-        "Lump",
-        "Principal",
-        "Interest",
-        "Int Saved",
-        "Balance",
-      ];
-      const cm = getCurrentMonth();
-      const r = schedule.map((r) => {
-        const s =
-          r.emi === 0
-            ? "-"
-            : r.m < cm
-              ? "Paid"
-              : r.m === cm
-                ? "Current"
-                : "Pending";
-        return [
-          r.m,
-          r.date,
-          s,
-          r.disbAmt || "",
-          r.emi || "",
-          r.stdEmi || "",
-          r.customEmiAmt || "",
-          r.lumpAmt || "",
-          r.prinPay || "",
-          r.intPay || "",
-          r.interestSaved || "",
-          r.remaining,
-        ];
-      });
-      const tot = [
-        "TOTALS",
-        "",
-        "",
-        totals.d,
-        totals.e,
-        "",
-        "",
-        "",
-        totals.p,
-        totals.i,
-        totals.s,
-        "",
-      ];
-      const csv = [
-        ["Loan:", activeLoan?.name],
-        ["Generated:", new Date().toLocaleDateString()],
-        ["Currency:", currency],
-        [],
-        h,
-        ...r,
-        tot,
-      ]
-        .map((row) =>
-          row
-            .map((c) => {
-              const s = String(c);
-              return s.includes(",") || s.includes('"')
-                ? `"${s.replace(/"/g, '""')}"`
-                : s;
-            })
-            .join(","),
-        )
-        .join("\n");
-      const blob = new Blob([csv], { type: "text/csv" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `loan-${activeLoan?.name.replace(/\s/g, "-")}-${new Date().toISOString().split("T")[0]}.csv`;
-      link.click();
+      const csv = generateCSV(schedule, totals, cm);
+      const filename = `loan-${activeLoan?.name.replace(/\s/g, "-")}-${new Date().toISOString().split("T")[0]}.csv`;
+      downloadFile(csv, filename);
       showToast("Downloaded!", "success");
     } catch {
       showToast("Failed", "error");
@@ -508,7 +326,7 @@ export default function LoanCalculator() {
     try {
       const hash = window.location.hash.slice(1);
       if (hash) {
-        const d = decode(hash);
+        const d = decodeData(hash);
         if (d?.loans?.length) {
           setLoans(migrateLoans(d.loans));
           setActiveTabId(d.activeId || d.loans[0].id);
@@ -587,180 +405,15 @@ export default function LoanCalculator() {
     };
   }, []);
 
-  const getCurrentMonth = () => {
-    const s = new Date(data.startDate),
-      n = new Date();
-    return Math.max(
-      1,
-      (n.getFullYear() - s.getFullYear()) * 12 +
-        n.getMonth() -
-        s.getMonth() +
-        1,
-    );
-  };
-
   const schedule = useMemo<ScheduleRow[]>(() => {
-    const {
-      rate,
-      years: y,
-      startDate: sd,
-      dispersals: ds,
-      customEmis: ces,
-      lumpSums: ls,
-    } = data;
-    const mr = rate / 100 / 12,
-      tm = y * 12;
-    const rows: ScheduleRow[] = [],
-      sds = [...ds].sort((a, b) => a.month - b.month);
-    let di = 0,
-      rem = 0,
-      cd = 0;
-
-    const getCE = (m: number) =>
-      ces
-        .filter((e) => e.fromMonth <= m)
-        .sort((a, b) => b.fromMonth - a.fromMonth)[0]?.amount || null;
-    const getLS = (m: number) => ls.find((l) => l.month === m)?.amount ?? null;
-
-    const std: { rem: number; int: number }[] = [];
-    let sr = 0,
-      sdi = 0;
-    for (let m = 1; m <= tm; m++) {
-      let da = 0;
-      if (sdi < sds.length && sds[sdi].month === m) {
-        da = sds[sdi].amount;
-        sr += da;
-        sdi++;
-      }
-      if (sr <= 0) {
-        std.push({ rem: 0, int: 0 });
-        continue;
-      }
-      const rm = tm - m + 1,
-        se =
-          mr === 0
-            ? sr / rm
-            : (sr * mr * Math.pow(1 + mr, rm)) / (Math.pow(1 + mr, rm) - 1);
-      const ip = sr * mr;
-      let pp = se - ip;
-      if (pp > sr) pp = sr;
-      sr = Math.max(0, sr - pp);
-      std.push({ rem: sr, int: ip });
-      if (sr <= 0.01) {
-        for (let r = m + 1; r <= tm; r++) std.push({ rem: 0, int: 0 });
-        break;
-      }
-    }
-
-    for (let m = 1; m <= tm; m++) {
-      const d = new Date(sd);
-      d.setMonth(d.getMonth() + m - 1);
-      let da = 0;
-      if (di < sds.length && sds[di].month === m) {
-        da = sds[di].amount;
-        rem += da;
-        cd += da;
-        di++;
-      }
-      if (rem <= 0) {
-        rows.push({
-          m,
-          date: d.toLocaleDateString(locale, {
-            year: "numeric",
-            month: "short",
-          }),
-          disbAmt: da,
-          emi: 0,
-          prinPay: 0,
-          intPay: 0,
-          remaining: 0,
-          cumDisbursed: cd,
-          payType: "none",
-          stdEmi: 0,
-          customEmiAmt: null,
-          lumpAmt: null,
-          interestSaved: 0,
-        });
-        continue;
-      }
-      const rm = tm - m + 1,
-        se =
-          mr === 0
-            ? rem / rm
-            : (rem * mr * Math.pow(1 + mr, rm)) / (Math.pow(1 + mr, rm) - 1);
-      const cea = getCE(m),
-        la = getLS(m),
-        ae = Math.max(se, cea ?? 0, la ?? 0);
-      let pt: ScheduleRow["payType"] = "std";
-      if (la && ae === la && la > se) pt = "lump";
-      else if (cea && ae > se) pt = "custom";
-      const ip = rem * mr;
-      let pp = ae - ip;
-      if (pp > rem) pp = rem;
-      const emi = ip + pp;
-      rem = Math.max(0, rem - pp);
-      const si = std[m - 1]?.int || 0,
-        isv = pt === "std" ? 0 : Math.max(0, si - ip);
-      rows.push({
-        m,
-        date: d.toLocaleDateString(locale, { year: "numeric", month: "short" }),
-        disbAmt: da,
-        emi,
-        prinPay: pp,
-        intPay: ip,
-        remaining: rem,
-        cumDisbursed: cd,
-        payType: pt,
-        stdEmi: se,
-        customEmiAmt: cea,
-        lumpAmt: la,
-        interestSaved: isv,
-      });
-      if (rem <= 0.01) {
-        for (let r = m + 1; r <= tm; r++) {
-          const rd = new Date(sd);
-          rd.setMonth(rd.getMonth() + r - 1);
-          rows.push({
-            m: r,
-            date: rd.toLocaleDateString(locale, {
-              year: "numeric",
-              month: "short",
-            }),
-            disbAmt: 0,
-            emi: 0,
-            prinPay: 0,
-            intPay: 0,
-            remaining: 0,
-            cumDisbursed: cd,
-            payType: "none",
-            stdEmi: 0,
-            customEmiAmt: null,
-            lumpAmt: null,
-            interestSaved: 0,
-          });
-        }
-        break;
-      }
-    }
-    return rows;
+    return calculateSchedule(data, locale);
   }, [data, locale]);
 
-  const totals = useMemo(
-    () =>
-      schedule.reduce(
-        (a, r) => ({
-          d: Math.max(a.d, r.cumDisbursed),
-          e: a.e + r.emi,
-          p: a.p + r.prinPay,
-          i: a.i + r.intPay,
-          s: a.s + r.interestSaved,
-        }),
-        { d: 0, e: 0, p: 0, i: 0, s: 0 },
-      ),
-    [schedule],
-  );
+  const totals = useMemo(() => {
+    return calculateTotals(schedule);
+  }, [schedule]);
 
-  const cm = getCurrentMonth();
+  const cm = getCurrentMonth(data.startDate);
   const paidTill = schedule
     .slice(0, Math.min(cm, schedule.length))
     .reduce((s, r) => s + r.emi, 0);
@@ -902,7 +555,7 @@ export default function LoanCalculator() {
             <div
               className={`rounded-xl p-3 mb-4 break-all text-xs font-mono ${isDark ? "bg-white/[0.06] text-gray-400" : "bg-gray-100 text-gray-600"}`}
             >
-              {getShareUrl()}
+              {getShareUrl({ loans, activeId: activeTabId })}
             </div>
             <div className="flex gap-2">
               <button
@@ -1590,197 +1243,5 @@ export default function LoanCalculator() {
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
     </div>
-  );
-}
-
-/* ── Sub-components ─────────────────────────────────────────────────────── */
-
-function AdvSection({
-  title,
-  count,
-  accentClass,
-  isDark,
-  tags,
-  showForm,
-  onAdd,
-  formContent,
-}: {
-  title: string;
-  count: number;
-  accentClass: string;
-  isDark: boolean;
-  tags: {
-    label: string;
-    color: string;
-    onRemove: () => void;
-    onClick?: () => void;
-  }[];
-  showForm: boolean;
-  onAdd: () => void;
-  onClose: () => void;
-  formContent: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div>
-      <button
-        onClick={() => setOpen((p) => !p)}
-        className={`flex items-center gap-2 text-xs font-semibold mb-2 ${isDark ? "text-gray-300 hover:text-gray-100" : "text-gray-600 hover:text-gray-900"} transition-colors`}
-      >
-        <span
-          className={`transition-transform ${open ? "rotate-90" : ""} inline-block`}
-        >
-          ›
-        </span>
-        <span>{title}</span>
-        {count > 0 && (
-          <span
-            className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${accentClass} ${isDark ? "bg-white/[0.06]" : "bg-gray-100"}`}
-          >
-            {count}
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="pl-4">
-          {tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {tags.map((t) => (
-                <span
-                  key={t.label}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border ${t.color}`}
-                >
-                  <span
-                    className={
-                      t.onClick ? "cursor-pointer hover:underline" : ""
-                    }
-                    onClick={t.onClick}
-                  >
-                    {t.label}
-                  </span>
-                  <button
-                    onClick={t.onRemove}
-                    className="hover:opacity-60 transition-opacity ml-0.5"
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          {!showForm ? (
-            <button
-              onClick={onAdd}
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-300 border border-white/[0.08]" : "bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200"}`}
-            >
-              + Add
-            </button>
-          ) : (
-            formContent
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NumInput({
-  placeholder,
-  value,
-  onChange,
-  onEnter,
-  isDark,
-  min,
-}: {
-  placeholder: string;
-  value: number;
-  onChange: (v: number) => void;
-  onEnter: () => void;
-  isDark: boolean;
-  min?: number;
-}) {
-  const cls = isDark
-    ? "w-24 px-2.5 py-1.5 rounded-lg text-xs outline-none bg-white/[0.06] border border-white/10 text-gray-100 placeholder-gray-600 focus:border-sky-400/60 focus:ring-1 focus:ring-sky-400/20"
-    : "w-24 px-2.5 py-1.5 rounded-lg text-xs outline-none bg-gray-50 border border-gray-200 text-gray-800 placeholder-gray-400 focus:border-sky-400 focus:ring-1 focus:ring-sky-400/20";
-  return (
-    <input
-      type="number"
-      placeholder={placeholder}
-      value={value}
-      min={min}
-      onChange={(e) => onChange(+e.target.value)}
-      onKeyDown={(e) => e.key === "Enter" && onEnter()}
-      className={cls}
-    />
-  );
-}
-
-function StrInput({
-  placeholder,
-  value,
-  onChange,
-  onEnter,
-  isDark,
-}: {
-  placeholder: string;
-  value: string;
-  onChange: (v: string) => void;
-  onEnter: () => void;
-  isDark: boolean;
-}) {
-  const cls = isDark
-    ? "w-28 px-2.5 py-1.5 rounded-lg text-xs outline-none bg-white/[0.06] border border-white/10 text-gray-100 placeholder-gray-600 focus:border-sky-400/60 focus:ring-1 focus:ring-sky-400/20"
-    : "w-28 px-2.5 py-1.5 rounded-lg text-xs outline-none bg-gray-50 border border-gray-200 text-gray-800 placeholder-gray-400 focus:border-sky-400 focus:ring-1 focus:ring-sky-400/20";
-  return (
-    <input
-      type="number"
-      placeholder={placeholder}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onKeyDown={(e) => e.key === "Enter" && onEnter()}
-      className={cls}
-    />
-  );
-}
-
-function ActionBtn({
-  onClick,
-  color,
-  children,
-}: {
-  onClick: () => void;
-  color: "sky" | "violet" | "amber";
-  isDark: boolean;
-  children: React.ReactNode;
-}) {
-  const colors = {
-    sky: "bg-sky-500 hover:bg-sky-400 text-white",
-    violet: "bg-violet-500 hover:bg-violet-400 text-white",
-    amber: "bg-amber-500 hover:bg-amber-400 text-white",
-  };
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${colors[color]}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function CancelBtn({
-  onClick,
-  isDark,
-}: {
-  onClick: () => void;
-  isDark: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`p-1.5 rounded-lg transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-500 hover:text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-400 hover:text-gray-600"}`}
-    >
-      <X size={12} />
-    </button>
   );
 }
