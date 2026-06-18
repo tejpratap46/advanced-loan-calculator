@@ -12,6 +12,7 @@
     "publish": true
   },
   "dependencies": {
+    "firebase": "^12.15.0",
     "hono": "^4.12.25",
     "lucide-react": "0.575.0",
     "react": "19.2.1",
