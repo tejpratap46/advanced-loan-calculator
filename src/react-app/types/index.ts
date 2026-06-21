@@ -21,6 +21,8 @@ export interface LoanData {
   dispersals: Dispersal[];
   customEmis: CustomEmi[];
   lumpSums: LumpSum[];
+  baselineOd?: number;
+  customOds?: { fromMonth: number; amount: number }[];
 }
 
 export interface Loan {
@@ -43,6 +45,7 @@ export interface ScheduleRow {
   customEmiAmt: number | null;
   lumpAmt: number | null;
   interestSaved: number;
+  odBal: number;
 }
 
 export interface Toast {

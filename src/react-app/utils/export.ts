@@ -17,6 +17,7 @@ export const generateCSV = (
     "Principal",
     "Interest",
     "Int Saved",
+    "OD Balance",
     "Balance",
   ];
 
@@ -41,6 +42,7 @@ export const generateCSV = (
       r.prinPay || "",
       r.intPay || "",
       r.interestSaved || "",
+      r.odBal || "",
       r.remaining,
     ];
   });
@@ -57,6 +59,7 @@ export const generateCSV = (
     totals.p,
     totals.i,
     totals.s,
+    "",
     "",
   ];
 

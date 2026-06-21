@@ -12,4 +12,6 @@ export const DEFAULT_DATA: LoanData = {
   dispersals: [],
   customEmis: [],
   lumpSums: [],
+  baselineOd: 0,
+  customOds: [],
 };

@@ -34,6 +34,13 @@ export const calculateSchedule = (
       .filter((e) => e.fromMonth <= m)
       .sort((a, b) => b.fromMonth - a.fromMonth)[0]?.amount || null;
   const getLS = (m: number) => ls.find((l) => l.month === m)?.amount ?? null;
+  const getOD = (m: number) => {
+    const customOds = data.customOds ?? [];
+    const activeCustom = customOds
+      .filter((o) => o.fromMonth <= m)
+      .sort((a, b) => b.fromMonth - a.fromMonth)[0];
+    return activeCustom ? activeCustom.amount : (data.baselineOd ?? 0);
+  };
 
   const std: { rem: number; int: number }[] = [];
   let sr = 0,
@@ -90,6 +97,7 @@ export const calculateSchedule = (
         customEmiAmt: null,
         lumpAmt: null,
         interestSaved: 0,
+        odBal: 0,
       });
       continue;
     }
@@ -104,8 +112,11 @@ export const calculateSchedule = (
     const ae = cea ?? se;
     let pt: ScheduleRow["payType"] = cea ? "custom" : "std";
     if (la) pt = "lump";
-    const ip = rem * mr;
+    const odb = getOD(m);
+    const netPrincipal = Math.max(0, rem - odb);
+    const ip = netPrincipal * mr;
     let pp = ae - ip;
+    if (pp > rem) pp = rem;
     const emi = ip + pp;
     rem = Math.max(0, rem - pp);
     if (la) {
@@ -113,7 +124,7 @@ export const calculateSchedule = (
       pp += la;
     }
     const si = std[m - 1]?.int || 0,
-      isv = pt === "std" ? 0 : Math.max(0, si - ip);
+      isv = Math.max(0, si - ip);
     rows.push({
       m,
       date: d.toLocaleDateString(locale, { year: "numeric", month: "short" }),
@@ -128,6 +139,7 @@ export const calculateSchedule = (
       customEmiAmt: cea,
       lumpAmt: la,
       interestSaved: isv,
+      odBal: odb,
     });
     if (rem <= 0.01) {
       for (let r = m + 1; r <= tm; r++) {
@@ -150,6 +162,7 @@ export const calculateSchedule = (
           customEmiAmt: null,
           lumpAmt: null,
           interestSaved: 0,
+          odBal: 0,
         });
       }
       break;

@@ -79,6 +79,12 @@ export default function LoanCalculator() {
     originalMonth?: number;
   }>({ month: 0, amount: "" });
   const [showLump, setShowLump] = useState(false);
+  const [newOd, setNewOd] = useState<{
+    fromMonth: number;
+    amount: string;
+    originalMonth?: number;
+  }>({ fromMonth: 1, amount: "" });
+  const [showOd, setShowOd] = useState(false);
 
   const activeLoan = loans.find((l) => l.id === activeTabId);
   const data = activeLoan?.data || DEFAULT_DATA;
@@ -211,8 +217,9 @@ export default function LoanCalculator() {
       const provider = new fb.auth.GoogleAuthProvider();
       await fb.auth().signInWithPopup(provider);
       showToast("Signed in", "success");
-    } catch {
-      showToast("Google login failed", "error");
+    } catch (error: any) {
+      console.error("Firebase Login Error:", error);
+      showToast(`Login failed: ${error.message || "Unknown error"}`, "error");
     }
   };
 
@@ -414,6 +421,7 @@ export default function LoanCalculator() {
   }, [schedule]);
 
   const cm = getCurrentMonth(data.startDate);
+  const hasOd = !!((data.baselineOd && data.baselineOd > 0) || (data.customOds && data.customOds.length > 0));
   const paidTill = schedule
     .slice(0, Math.min(cm, schedule.length))
     .reduce((s, r) => s + r.emi, 0);
@@ -471,6 +479,23 @@ export default function LoanCalculator() {
     });
     setNewLump({ month: 0, amount: "" });
     setShowLump(false);
+  };
+
+  const addOd = () => {
+    const a = parseFloat(newOd.amount);
+    if (isNaN(a) || a < 0) return;
+    const item = { fromMonth: newOd.fromMonth, amount: a };
+    const currentCustomOds = data.customOds || [];
+    updateData({
+      customOds: [
+        ...currentCustomOds.filter(
+          (o) => o.fromMonth !== (newOd.originalMonth ?? newOd.fromMonth),
+        ),
+        item,
+      ].sort((a, b) => a.fromMonth - b.fromMonth),
+    });
+    setNewOd({ fromMonth: 1, amount: "" });
+    setShowOd(false);
   };
 
   /* ── Theme-aware class helpers ────────────────────────────────────────── */
@@ -1062,6 +1087,96 @@ export default function LoanCalculator() {
                 </div>
               }
             />
+            {/* Overdraft / Offset Account */}
+            <AdvSection
+              title="Overdraft / Offset"
+              count={(data.baselineOd ? 1 : 0) + (data.customOds?.length || 0)}
+              accentClass="text-emerald-400"
+              isDark={isDark}
+              tags={[
+                ...(data.baselineOd
+                  ? [
+                      {
+                        label: `Baseline OD: ${fmt(data.baselineOd)}`,
+                        color: isDark
+                          ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200",
+                        onRemove: () => updateData({ baselineOd: 0 }),
+                      },
+                    ]
+                  : []),
+                ...(data.customOds || []).map((o) => ({
+                  label: `M${o.fromMonth} OD: ${fmt(o.amount)}`,
+                  color: isDark
+                    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                    : "bg-emerald-50 text-emerald-700 border-emerald-200",
+                  onRemove: () =>
+                    updateData({
+                      customOds: (data.customOds || []).filter(
+                        (x) => x.fromMonth !== o.fromMonth,
+                      ),
+                    }),
+                  onClick: () => {
+                    setNewOd({
+                      fromMonth: o.fromMonth,
+                      amount: o.amount.toString(),
+                      originalMonth: o.fromMonth,
+                    });
+                    setShowOd(true);
+                  },
+                })),
+              ]}
+              showForm={showOd}
+              onAdd={() => {
+                setNewOd({ fromMonth: 1, amount: "" });
+                setShowOd(true);
+              }}
+              onClose={() => setShowOd(false)}
+              formContent={
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <span className={`text-xs ${subtext}`}>Baseline OD Balance:</span>
+                    <NumInput
+                      placeholder="Baseline OD Balance"
+                      value={data.baselineOd || 0}
+                      onChange={(v) => updateData({ baselineOd: v })}
+                      onEnter={() => {}}
+                      isDark={isDark}
+                      min={0}
+                    />
+                  </div>
+                  <div className={`border-t ${divider} my-1`} />
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <span className={`text-xs ${subtext}`}>Add Monthly OD Balance:</span>
+                    <NumInput
+                      placeholder="From Month"
+                      value={newOd.fromMonth}
+                      onChange={(v) => setNewOd({ ...newOd, fromMonth: v })}
+                      onEnter={addOd}
+                      isDark={isDark}
+                      min={1}
+                    />
+                    <StrInput
+                      placeholder="OD Balance Amount"
+                      value={newOd.amount}
+                      onChange={(v) => setNewOd({ ...newOd, amount: v })}
+                      onEnter={addOd}
+                      isDark={isDark}
+                    />
+                    <ActionBtn onClick={addOd} color="emerald" isDark={isDark}>
+                      {newOd.originalMonth !== undefined ? "Save" : "Add"}
+                    </ActionBtn>
+                    <CancelBtn
+                      onClick={() => {
+                        setShowOd(false);
+                        setNewOd({ fromMonth: 1, amount: "" });
+                      }}
+                      isDark={isDark}
+                    />
+                  </div>
+                </div>
+              }
+            />
           </div>
         </div>
 
@@ -1093,6 +1208,7 @@ export default function LoanCalculator() {
                     "Principal",
                     "Interest",
                     "Saved",
+                    ...(hasOd ? ["OD Bal"] : []),
                     "Balance",
                   ].map((h) => (
                     <th
@@ -1223,6 +1339,15 @@ export default function LoanCalculator() {
                           <span className={subtext}>—</span>
                         )}
                       </td>
+                      {hasOd && (
+                        <td className="px-3 py-2.5 text-emerald-400 font-mono">
+                          {r.odBal > 0 ? (
+                            fmt(r.odBal)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                      )}
                       <td
                         className={`px-3 py-2.5 font-mono font-semibold ${heading}`}
                       >
