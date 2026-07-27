@@ -1,0 +1,19 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Document rules for user-specific loan data
+    match /loanCalculatorUsers/{userId} {
+      // Only an authenticated user can create their document matching their auth UID
+      allow create: if request.auth != null && request.auth.uid == userId;
+
+      // Only the document owner can read, update, or delete their data
+      allow read, update, delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Default deny for all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

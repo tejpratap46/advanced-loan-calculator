@@ -1,4 +1,4 @@
-import { LoanData, ScheduleRow } from "../types";
+import { LoanData, ScheduleRow, MiscExpense } from "../types";
 
 export const getCurrentMonth = (startDate: string) => {
   const s = new Date(startDate),
@@ -171,8 +171,11 @@ export const calculateSchedule = (
   return rows;
 };
 
-export const calculateTotals = (schedule: ScheduleRow[]) => {
-  return schedule.reduce(
+export const calculateTotals = (
+  schedule: ScheduleRow[],
+  miscExpenses: MiscExpense[] = [],
+) => {
+  const totals = schedule.reduce(
     (a, r) => ({
       d: Math.max(a.d, r.cumDisbursed),
       e: a.e + r.emi,
@@ -182,4 +185,9 @@ export const calculateTotals = (schedule: ScheduleRow[]) => {
     }),
     { d: 0, e: 0, p: 0, i: 0, s: 0 },
   );
+  const totalMisc = (miscExpenses || []).reduce((sum, item) => sum + (item.amount || 0), 0);
+  return {
+    ...totals,
+    m: totalMisc,
+  };
 };

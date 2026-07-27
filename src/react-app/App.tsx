@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 // Types
-import { Loan, LoanData, ScheduleRow, Toast } from "./types";
+import { Loan, LoanData, ScheduleRow, Toast, MiscExpense } from "./types";
 
 // Constants
 import {
@@ -85,6 +85,18 @@ export default function LoanCalculator() {
     originalMonth?: number;
   }>({ fromMonth: 1, amount: "" });
   const [showOd, setShowOd] = useState(false);
+  const [newMisc, setNewMisc] = useState<{
+    id?: string;
+    date: string;
+    amount: string;
+    comments: string;
+    originalId?: string;
+  }>({
+    date: new Date().toISOString().split("T")[0],
+    amount: "",
+    comments: "",
+  });
+  const [showMisc, setShowMisc] = useState(false);
 
   const activeLoan = loans.find((l) => l.id === activeTabId);
   const data = activeLoan?.data || DEFAULT_DATA;
@@ -320,7 +332,7 @@ export default function LoanCalculator() {
 
   const downloadCSV = () => {
     try {
-      const csv = generateCSV(schedule, totals, cm);
+      const csv = generateCSV(schedule, totals, cm, data.miscExpenses || []);
       const filename = `loan-${activeLoan?.name.replace(/\s/g, "-")}-${new Date().toISOString().split("T")[0]}.csv`;
       downloadFile(csv, filename);
       showToast("Downloaded!", "success");
@@ -417,8 +429,8 @@ export default function LoanCalculator() {
   }, [data, locale]);
 
   const totals = useMemo(() => {
-    return calculateTotals(schedule);
-  }, [schedule]);
+    return calculateTotals(schedule, data.miscExpenses || []);
+  }, [schedule, data.miscExpenses]);
 
   const cm = getCurrentMonth(data.startDate);
   const hasOd = !!((data.baselineOd && data.baselineOd > 0) || (data.customOds && data.customOds.length > 0));
@@ -498,14 +510,48 @@ export default function LoanCalculator() {
     setShowOd(false);
   };
 
+  const addMisc = () => {
+    const amt = parseFloat(newMisc.amount);
+    if (isNaN(amt) || amt <= 0 || !newMisc.date) return;
+    const currentMisc = data.miscExpenses || [];
+    let updated: MiscExpense[];
+    if (newMisc.originalId) {
+      updated = currentMisc.map((m) =>
+        m.id === newMisc.originalId
+          ? {
+              id: m.id,
+              date: newMisc.date,
+              amount: amt,
+              comments: newMisc.comments || "",
+            }
+          : m,
+      );
+    } else {
+      const newItem: MiscExpense = {
+        id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
+        date: newMisc.date,
+        amount: amt,
+        comments: newMisc.comments || "",
+      };
+      updated = [...currentMisc, newItem];
+    }
+    updateData({ miscExpenses: updated });
+    setShowMisc(false);
+    setNewMisc({
+      date: new Date().toISOString().split("T")[0],
+      amount: "",
+      comments: "",
+    });
+  };
+
   /* ── Theme-aware class helpers ────────────────────────────────────────── */
   const card = isDark
-    ? "bg-white/[0.04] border border-white/[0.08] rounded-2xl backdrop-blur-sm"
-    : "bg-white border border-gray-200 rounded-2xl shadow-sm";
+    ? "bg-white/[0.04] border border-white/[0.1] rounded-sm backdrop-blur-sm shadow-none"
+    : "bg-white border border-gray-200 rounded-sm shadow-none";
 
   const surfaceInput = isDark
-    ? "bg-white/[0.06] border border-white/10 text-gray-100 placeholder-gray-500 focus:border-sky-400/70 focus:ring-2 focus:ring-sky-400/20"
-    : "bg-gray-50 border border-gray-200 text-gray-800 placeholder-gray-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20";
+    ? "bg-white/[0.06] border border-white/10 text-gray-100 placeholder-gray-500 focus:border-sky-400/70 focus:ring-1 focus:ring-sky-400/20 rounded-sm"
+    : "bg-gray-50 border border-gray-200 text-gray-800 placeholder-gray-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 rounded-sm";
 
   const label = isDark ? "text-gray-400" : "text-gray-500";
   const heading = isDark ? "text-gray-100" : "text-gray-900";
@@ -544,7 +590,7 @@ export default function LoanCalculator() {
       {/* ── Toast ─────────────────────────────────────────────────────────── */}
       {toast && (
         <div
-          className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl text-sm font-semibold shadow-2xl animate-[slideIn_0.25s_ease-out] flex items-center gap-2 ${
+          className={`fixed top-4 right-4 z-50 px-3 py-2 rounded-sm text-xs font-semibold shadow-lg animate-[slideIn_0.25s_ease-out] flex items-center gap-2 ${
             toast.type === "success"
               ? "bg-emerald-500 text-white"
               : toast.type === "error"
@@ -559,37 +605,37 @@ export default function LoanCalculator() {
       {/* ── Share Modal ───────────────────────────────────────────────────── */}
       {showShareModal && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3"
           onClick={() => setShowShareModal(false)}
         >
           <div
-            className={`${card} max-w-md w-full p-6`}
+            className={`${card} max-w-md w-full p-4`}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className={`text-base font-semibold ${heading}`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-sm font-semibold ${heading}`}>
                 Share Calculator
               </h3>
               <button
                 onClick={() => setShowShareModal(false)}
-                className={`p-1.5 rounded-lg hover:bg-white/10 ${subtext}`}
+                className={`p-1 rounded-sm hover:bg-white/10 ${subtext}`}
               >
-                <X size={16} />
+                <X size={14} />
               </button>
             </div>
             <div
-              className={`rounded-xl p-3 mb-4 break-all text-xs font-mono ${isDark ? "bg-white/[0.06] text-gray-400" : "bg-gray-100 text-gray-600"}`}
+              className={`rounded-sm p-2 mb-3 break-all text-xs font-mono ${isDark ? "bg-white/[0.06] text-gray-400" : "bg-gray-100 text-gray-600"}`}
             >
               {getShareUrl({ loans, activeId: activeTabId })}
             </div>
             <div className="flex gap-2">
               <button
                 onClick={copy}
-                className="flex-1 px-4 py-2.5 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+                className="flex-1 px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-white rounded-sm text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
               >
                 {copied ? (
                   <>
-                    <Check size={15} /> Copied
+                    <Check size={13} /> Copied
                   </>
                 ) : (
                   "Copy link"
@@ -597,7 +643,7 @@ export default function LoanCalculator() {
               </button>
               <button
                 onClick={() => setShowShareModal(false)}
-                className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors ${isDark ? "bg-white/[0.06] hover:bg-white/10 text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
+                className={`px-3 py-1.5 rounded-sm text-xs font-semibold transition-colors ${isDark ? "bg-white/[0.06] hover:bg-white/10 text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
               >
                 Close
               </button>
@@ -660,51 +706,53 @@ export default function LoanCalculator() {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-5">
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-sky-500/20 flex items-center justify-center">
-              <Calculator size={18} className="text-sky-400" />
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-sm bg-sky-500/20 flex items-center justify-center border border-sky-500/30">
+              <Calculator size={16} className="text-sky-400" />
             </div>
             <div>
-              <h1 className={`text-lg font-bold tracking-tight ${heading}`}>
+              <h1 className={`text-base font-bold tracking-tight ${heading}`}>
                 Loan Calculator
               </h1>
-              <p className={`text-xs ${subtext}`}>
+              <p className={`text-[11px] ${subtext}`}>
                 Amortization & payoff planner
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {authReady &&
               (userEmail ? (
                 <>
                   <button
                     onClick={initiateSync}
                     disabled={syncBusy}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${isDark ? "bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}
+                    className={`px-2.5 py-1 rounded-sm text-xs font-semibold transition-colors ${isDark ? "bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}
                   >
                     {syncBusy ? "Syncing…" : "Sync"}
                   </button>
                   <button
                     onClick={signOut}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
+                    title={`Sign out (${userEmail})`}
+                    className={`max-w-[85px] xs:max-w-[120px] sm:max-w-[180px] truncate px-2 py-1 rounded-sm text-[11px] sm:text-xs font-semibold transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
                   >
-                    {userEmail}
+                    <span className="sm:hidden">{userEmail.split("@")[0]}</span>
+                    <span className="hidden sm:inline">{userEmail}</span>
                   </button>
                 </>
               ) : (
                 <button
                   onClick={signInWithGoogle}
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${isDark ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"}`}
+                  className={`px-2.5 py-1 rounded-sm text-xs font-semibold transition-colors ${isDark ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"}`}
                 >
                   Google Login
                 </button>
               ))}
             {/* Save indicator */}
             <div
-              className={`hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg ${isDark ? "bg-white/[0.04]" : "bg-gray-100"} ${saveStatus === "saving" ? "text-sky-400" : "text-emerald-400"}`}
+              className={`hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-sm ${isDark ? "bg-white/[0.04]" : "bg-gray-100"} ${saveStatus === "saving" ? "text-sky-400" : "text-emerald-400"}`}
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full ${saveStatus === "saving" ? "bg-sky-400 animate-pulse" : "bg-emerald-400"}`}
@@ -713,39 +761,39 @@ export default function LoanCalculator() {
             </div>
             <button
               onClick={downloadCSV}
-              className={`p-2 rounded-xl transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-gray-200" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
+              className={`p-1.5 rounded-sm transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-gray-200" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
               title="Export CSV"
             >
-              <Download size={16} />
+              <Download size={14} />
             </button>
             <button
               onClick={share}
-              className={`p-2 rounded-xl transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-gray-200" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
+              className={`p-1.5 rounded-sm transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-gray-200" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
               title="Share"
             >
-              <Share2 size={16} />
+              <Share2 size={14} />
             </button>
             <button
               onClick={() => setIsDark((p) => !p)}
-              className={`p-2 rounded-xl transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-yellow-300" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
+              className={`p-1.5 rounded-sm transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-yellow-300" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
               title="Toggle theme"
             >
-              {isDark ? <Sun size={16} /> : <Moon size={16} />}
+              {isDark ? <Sun size={14} /> : <Moon size={14} />}
             </button>
           </div>
         </div>
 
         {/* ── Tabs ────────────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-6 scrollbar-hide">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-4 scrollbar-hide">
           {loans.map((l) => (
             <div
               key={l.id}
-              className={`group flex items-center gap-1 pl-3 pr-2 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+              className={`group flex items-center gap-1 pl-2.5 pr-1.5 py-1.5 rounded-sm text-xs font-medium whitespace-nowrap transition-all border ${
                 activeTabId === l.id
-                  ? "bg-sky-500 text-white shadow-lg shadow-sky-500/25"
+                  ? "bg-sky-500 text-white border-sky-400"
                   : isDark
-                    ? "bg-white/[0.04] text-gray-400 hover:bg-white/[0.07] hover:text-gray-200"
-                    : "bg-white border border-gray-200 text-gray-500 hover:text-gray-800 hover:border-gray-300"
+                    ? "bg-white/[0.04] text-gray-400 border-white/10 hover:bg-white/[0.07] hover:text-gray-200"
+                    : "bg-white border-gray-200 text-gray-600 hover:text-gray-800 hover:border-gray-300"
               }`}
             >
               {editingTabId === l.id ? (
@@ -755,7 +803,7 @@ export default function LoanCalculator() {
                   onChange={(e) => setEditingName(e.target.value)}
                   onBlur={renameLoan}
                   onKeyDown={(e) => e.key === "Enter" && renameLoan()}
-                  className="bg-transparent outline-none w-24 text-sm"
+                  className="bg-transparent outline-none w-20 text-xs"
                 />
               ) : (
                 <button onClick={() => setActiveTabId(l.id)}>{l.name}</button>
@@ -765,34 +813,34 @@ export default function LoanCalculator() {
                   setEditingTabId(l.id);
                   setEditingName(l.name);
                 }}
-                className={`p-1 rounded-lg ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
+                className={`p-0.5 rounded-sm ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
               >
-                <Edit2 size={11} />
+                <Edit2 size={10} />
               </button>
               {loans.length > 1 && (
                 <button
                   onClick={() => deleteLoan(l.id)}
-                  className={`p-1 rounded-lg ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
+                  className={`p-0.5 rounded-sm ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
                 >
-                  <X size={11} />
+                  <X size={10} />
                 </button>
               )}
             </div>
           ))}
           <button
             onClick={addLoan}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors border ${
               isDark
-                ? "bg-white/[0.04] text-gray-400 hover:bg-white/[0.08] hover:text-gray-200 border border-white/[0.06] border-dashed"
-                : "bg-white border border-dashed border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400"
+                ? "bg-white/[0.04] text-gray-400 hover:bg-white/[0.08] hover:text-gray-200 border-white/10 border-dashed"
+                : "bg-white border-dashed border-gray-300 text-gray-500 hover:text-gray-700 hover:border-gray-400"
             }`}
           >
-            <Plus size={13} /> Add loan
+            <Plus size={12} /> Add loan
           </button>
         </div>
 
         {/* ── Summary Cards ───────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-4">
           {[
             {
               label: "Disbursed",
@@ -819,6 +867,12 @@ export default function LoanCalculator() {
               dot: "bg-emerald-400",
             },
             {
+              label: "Misc Charges",
+              value: totals.m || 0,
+              color: "text-orange-400",
+              dot: "bg-orange-400",
+            },
+            {
               label: "Paid",
               value: paidTill,
               color: "text-teal-400",
@@ -831,17 +885,17 @@ export default function LoanCalculator() {
               dot: "bg-rose-400",
             },
           ].map(({ label: l, value: v, color, dot }) => (
-            <div key={l} className={`${card} p-4 flex flex-col gap-2`}>
+            <div key={l} className={`${card} p-2.5 flex flex-col gap-1`}>
               <div className="flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
                 <span
-                  className={`text-[11px] font-medium tracking-wide uppercase ${subtext}`}
+                  className={`text-[10px] font-medium tracking-wide uppercase ${subtext}`}
                 >
                   {l}
                 </span>
               </div>
               <span
-                className={`text-lg font-bold font-mono tabular-nums leading-none ${color}`}
+                className={`text-sm sm:text-base font-bold font-mono tabular-nums leading-none ${color}`}
               >
                 {fmt(v)}
               </span>
@@ -850,11 +904,11 @@ export default function LoanCalculator() {
         </div>
 
         {/* ── Inputs ──────────────────────────────────────────────────────── */}
-        <div className={`${card} p-5 sm:p-6 mb-6`}>
-          <h2 className={`text-sm font-semibold mb-4 ${heading}`}>
+        <div className={`${card} p-3 sm:p-4 mb-4`}>
+          <h2 className={`text-xs font-semibold mb-3 uppercase tracking-wide ${heading}`}>
             Loan Parameters
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
             {[
               {
                 lbl: `Principal (${getCurrencySymbol(currency)})`,
@@ -882,13 +936,13 @@ export default function LoanCalculator() {
             ].map(({ lbl, key, type, ...rest }) => (
               <div key={key}>
                 <label
-                  className={`block text-[11px] font-medium mb-1.5 uppercase tracking-wide ${label}`}
+                  className={`block text-[10px] font-medium mb-1 uppercase tracking-wide ${label}`}
                 >
                   {lbl}
                 </label>
                 <input
                   type={type}
-                  className={`w-full px-3 py-2.5 rounded-xl text-sm outline-none transition-all ${surfaceInput}`}
+                  className={`w-full px-2.5 py-1.5 text-xs outline-none transition-all ${surfaceInput}`}
                   value={(data as any)[key]}
                   onChange={(e) =>
                     updateData({
@@ -1177,16 +1231,99 @@ export default function LoanCalculator() {
                 </div>
               }
             />
+            {/* Misc Expenses & Charges */}
+            <AdvSection
+              title="Misc Expenses & Charges"
+              count={data.miscExpenses?.length || 0}
+              accentClass="text-orange-400"
+              isDark={isDark}
+              tags={(data.miscExpenses || []).map((m) => ({
+                label: `${m.date}: ${fmt(m.amount)}${m.comments ? ` (${m.comments})` : ""}`,
+                color: isDark
+                  ? "bg-orange-500/10 text-orange-300 border-orange-500/20"
+                  : "bg-orange-50 text-orange-700 border-orange-200",
+                onRemove: () =>
+                  updateData({
+                    miscExpenses: (data.miscExpenses || []).filter(
+                      (x) => x.id !== m.id,
+                    ),
+                  }),
+                onClick: () => {
+                  setNewMisc({
+                    id: m.id,
+                    date: m.date,
+                    amount: m.amount.toString(),
+                    comments: m.comments,
+                    originalId: m.id,
+                  });
+                  setShowMisc(true);
+                },
+              }))}
+              showForm={showMisc}
+              onAdd={() => {
+                setNewMisc({
+                  date: new Date().toISOString().split("T")[0],
+                  amount: "",
+                  comments: "",
+                });
+                setShowMisc(true);
+              }}
+              onClose={() => setShowMisc(false)}
+              formContent={
+                <div className="flex flex-wrap gap-2 items-center">
+                  <input
+                    type="date"
+                    value={newMisc.date}
+                    onChange={(e) =>
+                      setNewMisc({ ...newMisc, date: e.target.value })
+                    }
+                    className={`px-2 py-1 text-xs rounded-sm border outline-none transition-colors ${
+                      isDark
+                        ? "bg-gray-800 border-gray-700 text-gray-200 focus:border-orange-500"
+                        : "bg-white border-gray-300 text-gray-800 focus:border-orange-500"
+                    }`}
+                  />
+                  <StrInput
+                    placeholder="Amount"
+                    value={newMisc.amount}
+                    onChange={(v) => setNewMisc({ ...newMisc, amount: v })}
+                    onEnter={addMisc}
+                    isDark={isDark}
+                  />
+                  <StrInput
+                    placeholder="Comments / Description"
+                    value={newMisc.comments}
+                    onChange={(v) => setNewMisc({ ...newMisc, comments: v })}
+                    onEnter={addMisc}
+                    isDark={isDark}
+                  />
+                  <ActionBtn onClick={addMisc} color="orange" isDark={isDark}>
+                    {newMisc.originalId !== undefined ? "Save" : "Add"}
+                  </ActionBtn>
+                  <CancelBtn
+                    onClick={() => {
+                      setShowMisc(false);
+                      setNewMisc({
+                        date: new Date().toISOString().split("T")[0],
+                        amount: "",
+                        comments: "",
+                      });
+                    }}
+                    isDark={isDark}
+                  />
+                </div>
+              }
+            />
           </div>
         </div>
 
         {/* ── Schedule Table ───────────────────────────────────────────────── */}
         <div className={`${card} overflow-hidden`}>
-          <div className="px-5 sm:px-6 py-4 flex items-center justify-between">
-            <h2 className={`text-sm font-semibold ${heading}`}>
+          <div className="px-3 sm:px-4 py-2.5 flex items-center justify-between border-b border-white/[0.06]">
+            <h2 className={`text-xs font-semibold uppercase tracking-wide ${heading}`}>
               Amortization Schedule
             </h2>
-            <span className={`text-xs ${subtext}`}>
+            <span className={`text-[11px] ${subtext}`}>
               {schedule.filter((r) => r.emi > 0).length} payments
             </span>
           </div>
@@ -1213,7 +1350,7 @@ export default function LoanCalculator() {
                   ].map((h) => (
                     <th
                       key={h}
-                      className={`px-3 py-3 text-left font-semibold uppercase tracking-wide text-[10px] ${subtext} whitespace-nowrap`}
+                      className={`px-2 py-2 text-left font-semibold uppercase tracking-wide text-[10px] ${subtext} whitespace-nowrap`}
                     >
                       {h}
                     </th>
@@ -1246,33 +1383,33 @@ export default function LoanCalculator() {
                       }`}
                     >
                       <td
-                        className={`px-3 py-2.5 font-medium ${heading} whitespace-nowrap`}
+                        className={`px-2 py-1.5 font-medium ${heading} whitespace-nowrap`}
                       >
                         {r.m}
                         {isCur && (
-                          <span className="ml-1.5 px-1.5 py-0.5 bg-sky-500 text-white rounded-md text-[9px] font-bold tracking-wide">
+                          <span className="ml-1 px-1 py-0.2 bg-sky-500 text-white rounded-sm text-[8px] font-bold tracking-wide">
                             NOW
                           </span>
                         )}
                       </td>
                       <td
-                        className={`px-3 py-2.5 ${subtext} whitespace-nowrap`}
+                        className={`px-2 py-1.5 ${subtext} whitespace-nowrap`}
                       >
                         {r.date}
                       </td>
-                      <td className="px-3 py-2.5">
+                      <td className="px-2 py-1.5">
                         {r.emi > 0 ? (
                           isPaid ? (
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                               ✓ Paid
                             </span>
                           ) : isCur ? (
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                            <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
                               Current
                             </span>
                           ) : (
                             <span
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${isDark ? "bg-white/[0.04] text-gray-500 border border-white/[0.06]" : "bg-gray-100 text-gray-400 border border-gray-200"}`}
+                              className={`px-1.5 py-0.5 rounded-sm text-[9px] font-semibold ${isDark ? "bg-white/[0.04] text-gray-500 border border-white/[0.06]" : "bg-gray-100 text-gray-400 border border-gray-200"}`}
                             >
                               Pending
                             </span>
@@ -1281,7 +1418,7 @@ export default function LoanCalculator() {
                           <span className={subtext}>—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-sky-400 font-mono">
+                      <td className="px-2 py-1.5 text-sky-400 font-mono">
                         {r.disbAmt > 0 ? (
                           fmt(r.disbAmt)
                         ) : (
@@ -1289,7 +1426,7 @@ export default function LoanCalculator() {
                         )}
                       </td>
                       <td
-                        className={`px-3 py-2.5 font-mono font-semibold ${heading}`}
+                        className={`px-2 py-1.5 font-mono font-semibold ${heading}`}
                       >
                         {r.emi > 0 ? (
                           fmt(r.emi)
@@ -1297,42 +1434,42 @@ export default function LoanCalculator() {
                           <span className={subtext}>—</span>
                         )}
                       </td>
-                      <td className={`px-3 py-2.5 font-mono ${subtext}`}>
+                      <td className={`px-2 py-1.5 font-mono ${subtext}`}>
                         {r.stdEmi > 0 ? (
                           fmt(r.stdEmi)
                         ) : (
                           <span className={subtext}>—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-violet-400 font-mono">
+                      <td className="px-2 py-1.5 text-violet-400 font-mono">
                         {r.customEmiAmt ? (
                           fmt(r.customEmiAmt)
                         ) : (
                           <span className={subtext}>—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-amber-400 font-mono">
+                      <td className="px-2 py-1.5 text-amber-400 font-mono">
                         {r.lumpAmt ? (
                           fmt(r.lumpAmt)
                         ) : (
                           <span className={subtext}>—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-teal-400 font-mono">
+                      <td className="px-2 py-1.5 text-teal-400 font-mono">
                         {r.prinPay > 0 ? (
                           fmt(r.prinPay)
                         ) : (
                           <span className={subtext}>—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-amber-400 font-mono">
+                      <td className="px-2 py-1.5 text-amber-400 font-mono">
                         {r.intPay > 0 ? (
                           fmt(r.intPay)
                         ) : (
                           <span className={subtext}>—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-emerald-400 font-mono font-semibold">
+                      <td className="px-2 py-1.5 text-emerald-400 font-mono font-semibold">
                         {r.interestSaved > 0 ? (
                           fmt(r.interestSaved)
                         ) : (
@@ -1340,7 +1477,7 @@ export default function LoanCalculator() {
                         )}
                       </td>
                       {hasOd && (
-                        <td className="px-3 py-2.5 text-emerald-400 font-mono">
+                        <td className="px-2 py-1.5 text-emerald-400 font-mono">
                           {r.odBal > 0 ? (
                             fmt(r.odBal)
                           ) : (
@@ -1349,7 +1486,7 @@ export default function LoanCalculator() {
                         </td>
                       )}
                       <td
-                        className={`px-3 py-2.5 font-mono font-semibold ${heading}`}
+                        className={`px-2 py-1.5 font-mono font-semibold ${heading}`}
                       >
                         {fmt(r.remaining)}
                       </td>

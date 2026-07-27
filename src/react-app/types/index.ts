@@ -13,6 +13,13 @@ export interface LumpSum {
   amount: number;
 }
 
+export interface MiscExpense {
+  id: string;
+  date: string;
+  amount: number;
+  comments: string;
+}
+
 export interface LoanData {
   principal: number;
   rate: number;
@@ -23,6 +30,7 @@ export interface LoanData {
   lumpSums: LumpSum[];
   baselineOd?: number;
   customOds?: { fromMonth: number; amount: number }[];
+  miscExpenses?: MiscExpense[];
 }
 
 export interface Loan {

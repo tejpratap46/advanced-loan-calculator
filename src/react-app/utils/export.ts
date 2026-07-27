@@ -1,9 +1,10 @@
-import { ScheduleRow } from "../types";
+import { ScheduleRow, MiscExpense } from "../types";
 
 export const generateCSV = (
   schedule: ScheduleRow[],
-  totals: { d: number; e: number; p: number; i: number; s: number },
+  totals: { d: number; e: number; p: number; i: number; s: number; m?: number },
   currentMonth: number,
+  miscExpenses: MiscExpense[] = [],
 ) => {
   const headers = [
     "Month",
@@ -72,7 +73,32 @@ export const generateCSV = (
     return `"${str.replace(/"/g, '""')}"`;
   };
 
-  const csvContent = [headers, ...rows, totalRow]
+  let csvRows = [headers, ...rows, totalRow];
+
+  if (miscExpenses.length > 0) {
+    const miscHeaderRow = ["", "", "", "", "", "", "", "", "", "", "", "", ""];
+    const miscTitleRow = ["MISC EXPENSES & CHARGES", "", "", "", "", "", "", "", "", "", "", "", ""];
+    const miscSubHeaders = ["Date", "Amount", "Comments", "", "", "", "", "", "", "", "", "", ""];
+    const miscDataRows = miscExpenses.map((e) => [
+      e.date,
+      e.amount,
+      e.comments,
+      "", "", "", "", "", "", "", "", "", ""
+    ]);
+    const totalMiscAmount = miscExpenses.reduce((sum, item) => sum + item.amount, 0);
+    const miscTotalRow = ["TOTAL MISC CHARGES", totalMiscAmount, "", "", "", "", "", "", "", "", "", "", ""];
+
+    csvRows = [
+      ...csvRows,
+      miscHeaderRow,
+      miscTitleRow,
+      miscSubHeaders,
+      ...miscDataRows,
+      miscTotalRow,
+    ];
+  }
+
+  const csvContent = csvRows
     .map((row) => row.map(escapeCSVCell).join(","))
     .join("\r\n");
 

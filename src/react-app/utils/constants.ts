@@ -14,4 +14,5 @@ export const DEFAULT_DATA: LoanData = {
   lumpSums: [],
   baselineOd: 0,
   customOds: [],
+  miscExpenses: [],
 };

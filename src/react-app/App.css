@@ -15,28 +15,28 @@ body {
 .glass {
 	background: rgba(255, 255, 255, 0.05);
 	backdrop-filter: blur(20px);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	border-radius: 24px;
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 4px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 .inp {
 	width: 100%;
-	padding: 14px 18px;
+	padding: 8px 12px;
 	background: rgba(255, 255, 255, 0.08);
 	border: 1px solid rgba(255, 255, 255, 0.15);
-	border-radius: 12px;
+	border-radius: 4px;
 	color: #f1f5f9;
-	font-size: 16px;
+	font-size: 13px;
 	font-family: 'Outfit', sans-serif;
-	transition: all 0.3s;
+	transition: all 0.2s;
 	outline: none;
 }
 
 .inp:focus {
 	background: rgba(255, 255, 255, 0.12);
 	border-color: #60a5fa;
-	box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+	box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.15);
 }
 
 .inp::placeholder {
@@ -44,28 +44,28 @@ body {
 }
 
 .btn {
-	padding: 12px 28px;
+	padding: 6px 16px;
 	border: none;
-	border-radius: 12px;
+	border-radius: 4px;
 	font-weight: 600;
-	font-size: 15px;
+	font-size: 13px;
 	cursor: pointer;
-	transition: all 0.3s;
+	transition: all 0.2s;
 	font-family: 'Outfit', sans-serif;
 	display: inline-flex;
 	align-items: center;
-	gap: 8px;
+	gap: 6px;
 }
 
 .btn-blue {
 	background: linear-gradient(135deg, #3b82f6, #2563eb);
 	color: #fff;
-	box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+	box-shadow: 0 2px 6px rgba(59, 130, 246, 0.25);
 }
 
 .btn-blue:hover {
-	transform: translateY(-2px);
-	box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
 }
 
 .btn-ghost {
@@ -79,9 +79,9 @@ body {
 }
 
 .btn-sm {
-	padding: 6px 14px;
-	font-size: 13px;
-	border-radius: 8px;
+	padding: 4px 10px;
+	font-size: 12px;
+	border-radius: 4px;
 }
 
 .btn-danger {
@@ -97,13 +97,13 @@ body {
 .chip {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
-	padding: 6px 12px;
+	gap: 4px;
+	padding: 3px 8px;
 	background: rgba(34, 197, 94, 0.2);
 	color: #86efac;
 	border: 1px solid rgba(34, 197, 94, 0.3);
-	border-radius: 20px;
-	font-size: 12px;
+	border-radius: 4px;
+	font-size: 11px;
 	font-weight: 500;
 }
 
@@ -122,8 +122,8 @@ body {
 .stat-card {
 	background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(37, 99, 235, 0.1));
 	border: 1px solid rgba(59, 130, 246, 0.2);
-	border-radius: 16px;
-	padding: 1.5rem;
+	border-radius: 4px;
+	padding: 0.75rem 1rem;
 	position: relative;
 	overflow: hidden;
 }
@@ -134,23 +134,23 @@ body {
 	top: 0;
 	left: 0;
 	right: 0;
-	height: 3px;
+	height: 2px;
 	background: linear-gradient(90deg, #3b82f6, #2563eb);
 }
 
 .tbl-wrap {
 	overflow-x: auto;
-	border-radius: 16px;
+	border-radius: 4px;
 	background: rgba(255, 255, 255, 0.03);
 	border: 1px solid rgba(255, 255, 255, 0.1);
-	max-height: 600px;
+	max-height: 550px;
 	overflow-y: auto;
 }
 
 table {
 	width: 100%;
 	border-collapse: collapse;
-	font-size: 13px;
+	font-size: 12px;
 }
 
 thead {
@@ -161,7 +161,7 @@ thead {
 }
 
 th {
-	padding: 14px 10px;
+	padding: 8px 8px;
 	text-align: left;
 	font-weight: 600;
 	color: #bfdbfe;
@@ -173,7 +173,7 @@ th {
 }
 
 td {
-	padding: 12px 10px;
+	padding: 6px 8px;
 	color: #e2e8f0;
 	border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 	font-family: 'JetBrains Mono', monospace;
@@ -197,9 +197,9 @@ tr.row-lump td {
 }
 
 tfoot td {
-	padding: 16px 10px;
+	padding: 10px 8px;
 	color: #93c5fd;
-	font-size: 13px;
+	font-size: 12px;
 	font-weight: 600;
 	background: rgba(59, 130, 246, 0.1);
 	border-top: 2px solid rgba(59, 130, 246, 0.3);
