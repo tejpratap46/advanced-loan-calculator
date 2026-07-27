@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "firebase": "^12.15.0",
-    "hono": "^4.12.25",
+    "hono": "^4.12.32",
     "lucide-react": "0.575.0",
     "react": "19.2.1",
     "react-dom": "19.2.1"
@@ -39,7 +39,13 @@
   "overrides": {
     "esbuild": "0.25.12",
     "ws": "8.21.0",
-    "undici": "8.5.0"
+    "undici": "8.5.0",
+    "brace-expansion": "5.0.8",
+    "minimatch": "^9.0.5",
+    "js-yaml": "^4.1.1",
+    "postcss": "^8.5.18",
+    "protobufjs": "^7.6.5",
+    "sharp": "^0.35.0"
   },
   "private": true,
   "scripts": {

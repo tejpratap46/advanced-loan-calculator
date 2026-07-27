@@ -3,7 +3,12 @@ export const encodeData = (data: any) =>
 
 export const decodeData = (hash: string) => {
   try {
-    return JSON.parse(decodeURIComponent(atob(hash)));
+    return JSON.parse(decodeURIComponent(atob(hash)), (key, value) => {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+        return undefined;
+      }
+      return value;
+    });
   } catch {
     return null;
   }

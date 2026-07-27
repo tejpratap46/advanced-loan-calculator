@@ -58,16 +58,7 @@ Your application will be available at [http://localhost:5173](http://localhost:5
 
 ### Firebase Google Login + Firestore Sync
 
-To enable Google authentication and cloud sync, add these variables in a `.env` file:
-
-```bash
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=...
-VITE_FIREBASE_PROJECT_ID=...
-VITE_FIREBASE_APP_ID=...
-```
-
-Then in Firebase:
+In Firebase:
 - Enable **Authentication → Google** sign-in provider.
 - Create a Firestore database (the app syncs to `loanCalculatorUsers/{uid}`).
 

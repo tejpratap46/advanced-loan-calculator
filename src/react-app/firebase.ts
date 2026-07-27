@@ -3,24 +3,14 @@ import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: "AIzaSyCjy8Kb9MWb4KnKdN4iaH3_fXO40PXLjgQ",
+  authDomain: "tps-loan-calculator.firebaseapp.com",
+  projectId: "tps-loan-calculator",
+  storageBucket: "tps-loan-calculator.firebasestorage.app",
+  messagingSenderId: "621307918285",
+  appId: "1:621307918285:web:ff9c4dabd49db6c794b684",
+  measurementId: "G-DXSK0TFBFN",
 };
-
-// Simple check for required environment variables
-const missingKeys = Object.entries(firebaseConfig)
-  .filter(([_, value]) => !value || value === "YOUR_API_KEY")
-  .map(([key]) => key);
-
-if (missingKeys.length > 0) {
-  console.warn(
-    `Firebase initialization warning: Missing or placeholder values for: ${missingKeys.join(", ")}. Check your .env file.`,
-  );
-}
 
 let app: FirebaseApp;
 let auth: Auth;

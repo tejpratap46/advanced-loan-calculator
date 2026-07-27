@@ -63,9 +63,18 @@ export const generateCSV = (
     "",
   ];
 
+  const escapeCSVCell = (val: any): string => {
+    if (val === null || val === undefined) return '""';
+    let str = String(val);
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = "'" + str;
+    }
+    return `"${str.replace(/"/g, '""')}"`;
+  };
+
   const csvContent = [headers, ...rows, totalRow]
-    .map((e) => e.join(","))
-    .join("\n");
+    .map((row) => row.map(escapeCSVCell).join(","))
+    .join("\r\n");
 
   return csvContent;
 };
