@@ -5,6 +5,7 @@ interface NumInputProps {
   onEnter: () => void;
   isDark: boolean;
   min?: number;
+  max?: number;
 }
 
 export function NumInput({
@@ -14,6 +15,7 @@ export function NumInput({
   onEnter,
   isDark,
   min,
+  max,
 }: NumInputProps) {
   const cls = isDark
     ? "w-24 px-2 py-1 rounded-sm text-xs outline-none bg-white/[0.06] border border-white/10 text-gray-100 placeholder-gray-600 focus:border-sky-400/60 focus:ring-1 focus:ring-sky-400/20"
@@ -24,6 +26,7 @@ export function NumInput({
       placeholder={placeholder}
       value={value}
       min={min}
+      max={max}
       onChange={(e) => onChange(+e.target.value)}
       onKeyDown={(e) => e.key === "Enter" && onEnter()}
       className={cls}

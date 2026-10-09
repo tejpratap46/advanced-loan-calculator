@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import {
   Calculator,
   Sun,
@@ -9,10 +9,21 @@ import {
   X,
   Edit2,
   Check,
+  ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 
 // Types
-import { Loan, LoanData, ScheduleRow, Toast, MiscExpense } from "./types";
+import {
+  Loan,
+  LoanData,
+  ScheduleRow,
+  Toast,
+  MiscExpense,
+  Dispersal,
+  CustomEmi,
+  LumpSum,
+} from "./types";
 
 // Constants
 import {
@@ -29,8 +40,10 @@ import {
   calculateSchedule,
   calculateTotals,
   getCurrentMonth,
+  getMonthCalendarInfo,
+  formatDayDate,
 } from "./utils/calculations";
-import { generateCSV, downloadFile } from "./utils/export";
+import { generateCSV, generateDailyCSV, downloadFile } from "./utils/export";
 import { decodeData, getShareUrl } from "./utils/share";
 
 // Components
@@ -62,23 +75,30 @@ export default function LoanCalculator() {
   } | null>(null);
 
   const [newDisp, setNewDisp] = useState<{
+    id?: string;
     month: number;
+    day: number;
     amount: number;
-    originalMonth?: number;
-  }>({ month: 1, amount: 0 });
+    originalId?: string;
+  }>({ month: 1, day: 1, amount: 0 });
   const [showDisp, setShowDisp] = useState(false);
   const [newEmi, setNewEmi] = useState<{
+    id?: string;
     fromMonth: number;
+    day: number;
     amount: string;
-    originalMonth?: number;
-  }>({ fromMonth: 1, amount: "" });
+    originalId?: string;
+  }>({ fromMonth: 1, day: 1, amount: "" });
   const [showEmi, setShowEmi] = useState(false);
   const [newLump, setNewLump] = useState<{
+    id?: string;
     month: number;
+    day: number;
     amount: string;
-    originalMonth?: number;
-  }>({ month: 0, amount: "" });
+    originalId?: string;
+  }>({ month: 0, day: 1, amount: "" });
   const [showLump, setShowLump] = useState(false);
+  const [expandedMonths, setExpandedMonths] = useState<Record<number, boolean>>({});
   const [newOd, setNewOd] = useState<{
     fromMonth: number;
     amount: string;
@@ -442,6 +462,36 @@ export default function LoanCalculator() {
       ? 0
       : schedule.slice(cm).reduce((s, r) => s + r.emi, 0);
 
+  const toggleMonth = (m: number) => {
+    setExpandedMonths((prev) => ({ ...prev, [m]: !prev[m] }));
+  };
+
+  const toggleAllMonths = () => {
+    const allExpanded =
+      schedule.length > 0 && schedule.every((r) => expandedMonths[r.m]);
+    if (allExpanded) {
+      setExpandedMonths({});
+    } else {
+      const next: Record<number, boolean> = {};
+      schedule.forEach((r) => {
+        next[r.m] = true;
+      });
+      setExpandedMonths(next);
+    }
+  };
+
+  const getResolvedDate = (monthNum: number, dayNum: number) => {
+    const info = getMonthCalendarInfo(data.startDate, Math.max(1, monthNum));
+    const clampedDay = Math.min(info.daysInMonth, Math.max(1, dayNum || 1));
+    return formatDayDate(info.year, info.monthIndex, clampedDay, locale).dateStr;
+  };
+
+  const exportDailyData = () => {
+    const csv = generateDailyCSV(schedule);
+    downloadFile(csv, `${activeLoan?.name || "loan"}-daily-schedule.csv`);
+    showToast("Exported Daily CSV", "success");
+  };
+
   const addDisp = () => {
     if (
       newDisp.month < 1 ||
@@ -449,47 +499,106 @@ export default function LoanCalculator() {
       newDisp.amount <= 0
     )
       return;
-    const item = { month: newDisp.month, amount: newDisp.amount };
+    const day = Math.min(31, Math.max(1, newDisp.day || 1));
+    const currentDispersals = data.dispersals || [];
+    let updated: Dispersal[];
+    if (newDisp.originalId) {
+      updated = currentDispersals.map((d) =>
+        (d.id && d.id === newDisp.originalId) || (!d.id && `${d.month}-${d.day || 1}` === newDisp.originalId)
+          ? {
+              id: d.id || newDisp.originalId,
+              month: newDisp.month,
+              day,
+              amount: newDisp.amount,
+            }
+          : d,
+      );
+    } else {
+      const newItem: Dispersal = {
+        id: `disp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        month: newDisp.month,
+        day,
+        amount: newDisp.amount,
+      };
+      updated = [...currentDispersals, newItem];
+    }
     updateData({
-      dispersals: [
-        ...data.dispersals.filter(
-          (x) => x.month !== (newDisp.originalMonth ?? newDisp.month),
-        ),
-        item,
-      ],
+      dispersals: updated.sort(
+        (a, b) => a.month - b.month || (a.day || 1) - (b.day || 1),
+      ),
     });
-    setNewDisp({ month: 1, amount: 0 });
+    setNewDisp({ month: 1, day: 1, amount: 0 });
     setShowDisp(false);
   };
+
   const addCEmi = () => {
     const a = parseFloat(newEmi.amount);
-    if (!a || a <= 0) return;
-    const item = { fromMonth: newEmi.fromMonth, amount: a };
+    if (!a || a <= 0 || newEmi.fromMonth < 1) return;
+    const day = Math.min(31, Math.max(1, newEmi.day || 1));
+    const currentCustomEmis = data.customEmis || [];
+    let updated: CustomEmi[];
+    if (newEmi.originalId) {
+      updated = currentCustomEmis.map((e) =>
+        (e.id && e.id === newEmi.originalId) || (!e.id && `${e.fromMonth}-${e.day || 1}` === newEmi.originalId)
+          ? {
+              id: e.id || newEmi.originalId,
+              fromMonth: newEmi.fromMonth,
+              day,
+              amount: a,
+            }
+          : e,
+      );
+    } else {
+      const newItem: CustomEmi = {
+        id: `emi-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        fromMonth: newEmi.fromMonth,
+        day,
+        amount: a,
+      };
+      updated = [...currentCustomEmis, newItem];
+    }
     updateData({
-      customEmis: [
-        ...data.customEmis.filter(
-          (e) => e.fromMonth !== (newEmi.originalMonth ?? newEmi.fromMonth),
-        ),
-        item,
-      ].sort((a, b) => a.fromMonth - b.fromMonth),
+      customEmis: updated.sort(
+        (a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1),
+      ),
     });
-    setNewEmi({ fromMonth: 1, amount: "" });
+    setNewEmi({ fromMonth: 1, day: 1, amount: "" });
     setShowEmi(false);
   };
+
   const addLS = () => {
     const a = parseFloat(newLump.amount);
     const m = newLump.month;
     if (!a || a <= 0 || m < 0) return;
-    const item = { month: m, amount: a };
+    const day = Math.min(31, Math.max(1, newLump.day || 1));
+    const currentLumpSums = data.lumpSums || [];
+    let updated: LumpSum[];
+    if (newLump.originalId) {
+      updated = currentLumpSums.map((l) =>
+        (l.id && l.id === newLump.originalId) || (!l.id && `${l.month}-${l.day || 1}` === newLump.originalId)
+          ? {
+              id: l.id || newLump.originalId,
+              month: m,
+              day,
+              amount: a,
+            }
+          : l,
+      );
+    } else {
+      const newItem: LumpSum = {
+        id: `lump-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        month: m,
+        day,
+        amount: a,
+      };
+      updated = [...currentLumpSums, newItem];
+    }
     updateData({
-      lumpSums: [
-        ...data.lumpSums.filter(
-          (l) => l.month !== (newLump.originalMonth ?? m),
-        ),
-        item,
-      ].sort((a, b) => a.month - b.month),
+      lumpSums: updated.sort(
+        (a, b) => a.month - b.month || (a.day || 1) - (b.day || 1),
+      ),
     });
-    setNewLump({ month: 0, amount: "" });
+    setNewLump({ month: 0, day: 1, amount: "" });
     setShowLump(false);
   };
 
@@ -965,26 +1074,35 @@ export default function LoanCalculator() {
               accentClass="text-sky-400"
               isDark={isDark}
               tags={data.dispersals
-                .sort((a, b) => a.month - b.month)
+                .sort(
+                  (a, b) =>
+                    a.month - b.month || (a.day || 1) - (b.day || 1),
+                )
                 .map((d) => ({
-                  label: `M${d.month}: ${fmt(d.amount)}`,
+                  label: `M${d.month} · D${d.day || 1} (${getResolvedDate(d.month, d.day || 1)}): ${fmt(d.amount)}`,
                   color: isDark
                     ? "bg-sky-500/10 text-sky-300 border-sky-500/20"
                     : "bg-sky-50 text-sky-700 border-sky-200",
                   onRemove: () =>
                     updateData({
-                      dispersals: data.dispersals.filter(
-                        (x) => x.month !== d.month,
+                      dispersals: data.dispersals.filter((x) =>
+                        d.id ? x.id !== d.id : (x.month !== d.month || (x.day || 1) !== (d.day || 1)),
                       ),
                     }),
                   onClick: () => {
-                    setNewDisp({ ...d, originalMonth: d.month });
+                    setNewDisp({
+                      id: d.id,
+                      month: d.month,
+                      day: d.day || 1,
+                      amount: d.amount,
+                      originalId: d.id || `${d.month}-${d.day || 1}`,
+                    });
                     setShowDisp(true);
                   },
                 }))}
               showForm={showDisp}
               onAdd={() => {
-                setNewDisp({ month: 1, amount: 0 });
+                setNewDisp({ month: 1, day: 1, amount: 0 });
                 setShowDisp(true);
               }}
               onClose={() => setShowDisp(false)}
@@ -996,6 +1114,22 @@ export default function LoanCalculator() {
                     onChange={(v) => setNewDisp({ ...newDisp, month: v })}
                     onEnter={addDisp}
                     isDark={isDark}
+                    min={1}
+                    max={data.years * 12}
+                  />
+                  <NumInput
+                    placeholder="Day (1-31)"
+                    value={newDisp.day}
+                    onChange={(v) =>
+                      setNewDisp({
+                        ...newDisp,
+                        day: Math.min(31, Math.max(1, v)),
+                      })
+                    }
+                    onEnter={addDisp}
+                    isDark={isDark}
+                    min={1}
+                    max={31}
                   />
                   <NumInput
                     placeholder="Amount"
@@ -1004,13 +1138,22 @@ export default function LoanCalculator() {
                     onEnter={addDisp}
                     isDark={isDark}
                   />
+                  <span
+                    className={`text-[11px] px-2 py-1 rounded font-mono ${
+                      isDark
+                        ? "bg-sky-500/10 text-sky-300 border border-sky-500/20"
+                        : "bg-sky-50 text-sky-700 border border-sky-200"
+                    }`}
+                  >
+                    📅 {getResolvedDate(newDisp.month, newDisp.day)}
+                  </span>
                   <ActionBtn onClick={addDisp} color="sky" isDark={isDark}>
-                    {newDisp.originalMonth !== undefined ? "Save" : "Add"}
+                    {newDisp.originalId !== undefined ? "Save" : "Add"}
                   </ActionBtn>
                   <CancelBtn
                     onClick={() => {
                       setShowDisp(false);
-                      setNewDisp({ month: 1, amount: 0 });
+                      setNewDisp({ month: 1, day: 1, amount: 0 });
                     }}
                     isDark={isDark}
                   />
@@ -1023,29 +1166,36 @@ export default function LoanCalculator() {
               count={data.customEmis.length}
               accentClass="text-violet-400"
               isDark={isDark}
-              tags={data.customEmis.map((e) => ({
-                label: `M${e.fromMonth}: ${fmt(e.amount)}`,
-                color: isDark
-                  ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
-                  : "bg-violet-50 text-violet-700 border-violet-200",
-                onRemove: () =>
-                  updateData({
-                    customEmis: data.customEmis.filter(
-                      (x) => x.fromMonth !== e.fromMonth,
-                    ),
-                  }),
-                onClick: () => {
-                  setNewEmi({
-                    fromMonth: e.fromMonth,
-                    amount: e.amount.toString(),
-                    originalMonth: e.fromMonth,
-                  });
-                  setShowEmi(true);
-                },
-              }))}
+              tags={data.customEmis
+                .sort(
+                  (a, b) =>
+                    a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1),
+                )
+                .map((e) => ({
+                  label: `M${e.fromMonth} · D${e.day || 1} (${getResolvedDate(e.fromMonth, e.day || 1)}): ${fmt(e.amount)}`,
+                  color: isDark
+                    ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
+                    : "bg-violet-50 text-violet-700 border-violet-200",
+                  onRemove: () =>
+                    updateData({
+                      customEmis: data.customEmis.filter((x) =>
+                        e.id ? x.id !== e.id : (x.fromMonth !== e.fromMonth || (x.day || 1) !== (e.day || 1)),
+                      ),
+                    }),
+                  onClick: () => {
+                    setNewEmi({
+                      id: e.id,
+                      fromMonth: e.fromMonth,
+                      day: e.day || 1,
+                      amount: e.amount.toString(),
+                      originalId: e.id || `${e.fromMonth}-${e.day || 1}`,
+                    });
+                    setShowEmi(true);
+                  },
+                }))}
               showForm={showEmi}
               onAdd={() => {
-                setNewEmi({ fromMonth: 1, amount: "" });
+                setNewEmi({ fromMonth: 1, day: 1, amount: "" });
                 setShowEmi(true);
               }}
               onClose={() => setShowEmi(false)}
@@ -1057,6 +1207,22 @@ export default function LoanCalculator() {
                     onChange={(v) => setNewEmi({ ...newEmi, fromMonth: v })}
                     onEnter={addCEmi}
                     isDark={isDark}
+                    min={1}
+                    max={data.years * 12}
+                  />
+                  <NumInput
+                    placeholder="Day (1-31)"
+                    value={newEmi.day}
+                    onChange={(v) =>
+                      setNewEmi({
+                        ...newEmi,
+                        day: Math.min(31, Math.max(1, v)),
+                      })
+                    }
+                    onEnter={addCEmi}
+                    isDark={isDark}
+                    min={1}
+                    max={31}
                   />
                   <StrInput
                     placeholder="Amount"
@@ -1065,13 +1231,22 @@ export default function LoanCalculator() {
                     onEnter={addCEmi}
                     isDark={isDark}
                   />
+                  <span
+                    className={`text-[11px] px-2 py-1 rounded font-mono ${
+                      isDark
+                        ? "bg-violet-500/10 text-violet-300 border border-violet-500/20"
+                        : "bg-violet-50 text-violet-700 border border-violet-200"
+                    }`}
+                  >
+                    📅 {getResolvedDate(newEmi.fromMonth, newEmi.day)}
+                  </span>
                   <ActionBtn onClick={addCEmi} color="violet" isDark={isDark}>
-                    {newEmi.originalMonth !== undefined ? "Save" : "Add"}
+                    {newEmi.originalId !== undefined ? "Save" : "Add"}
                   </ActionBtn>
                   <CancelBtn
                     onClick={() => {
                       setShowEmi(false);
-                      setNewEmi({ fromMonth: 1, amount: "" });
+                      setNewEmi({ fromMonth: 1, day: 1, amount: "" });
                     }}
                     isDark={isDark}
                   />
@@ -1084,30 +1259,39 @@ export default function LoanCalculator() {
               count={data.lumpSums.length}
               accentClass="text-amber-400"
               isDark={isDark}
-              tags={data.lumpSums.map((l) => ({
-                label:
-                  l.month === 0
-                    ? `Down: ${fmt(l.amount)}`
-                    : `M${l.month}: ${fmt(l.amount)}`,
-                color: isDark
-                  ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
-                  : "bg-amber-50 text-amber-700 border-amber-200",
-                onRemove: () =>
-                  updateData({
-                    lumpSums: data.lumpSums.filter((x) => x.month !== l.month),
-                  }),
-                onClick: () => {
-                  setNewLump({
-                    month: l.month,
-                    amount: l.amount.toString(),
-                    originalMonth: l.month,
-                  });
-                  setShowLump(true);
-                },
-              }))}
+              tags={data.lumpSums
+                .sort(
+                  (a, b) =>
+                    a.month - b.month || (a.day || 1) - (b.day || 1),
+                )
+                .map((l) => ({
+                  label:
+                    l.month === 0
+                      ? `Down · D${l.day || 1} (${getResolvedDate(1, l.day || 1)}): ${fmt(l.amount)}`
+                      : `M${l.month} · D${l.day || 1} (${getResolvedDate(l.month, l.day || 1)}): ${fmt(l.amount)}`,
+                  color: isDark
+                    ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                    : "bg-amber-50 text-amber-700 border-amber-200",
+                  onRemove: () =>
+                    updateData({
+                      lumpSums: data.lumpSums.filter((x) =>
+                        l.id ? x.id !== l.id : (x.month !== l.month || (x.day || 1) !== (l.day || 1)),
+                      ),
+                    }),
+                  onClick: () => {
+                    setNewLump({
+                      id: l.id,
+                      month: l.month,
+                      day: l.day || 1,
+                      amount: l.amount.toString(),
+                      originalId: l.id || `${l.month}-${l.day || 1}`,
+                    });
+                    setShowLump(true);
+                  },
+                }))}
               showForm={showLump}
               onAdd={() => {
-                setNewLump({ month: 0, amount: "" });
+                setNewLump({ month: 0, day: 1, amount: "" });
                 setShowLump(true);
               }}
               onClose={() => setShowLump(false)}
@@ -1120,6 +1304,21 @@ export default function LoanCalculator() {
                     onEnter={addLS}
                     isDark={isDark}
                     min={0}
+                    max={data.years * 12}
+                  />
+                  <NumInput
+                    placeholder="Day (1-31)"
+                    value={newLump.day}
+                    onChange={(v) =>
+                      setNewLump({
+                        ...newLump,
+                        day: Math.min(31, Math.max(1, v)),
+                      })
+                    }
+                    onEnter={addLS}
+                    isDark={isDark}
+                    min={1}
+                    max={31}
                   />
                   <StrInput
                     placeholder="Amount"
@@ -1128,13 +1327,22 @@ export default function LoanCalculator() {
                     onEnter={addLS}
                     isDark={isDark}
                   />
+                  <span
+                    className={`text-[11px] px-2 py-1 rounded font-mono ${
+                      isDark
+                        ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                        : "bg-amber-50 text-amber-700 border border-amber-200"
+                    }`}
+                  >
+                    📅 {getResolvedDate(Math.max(1, newLump.month), newLump.day)}
+                  </span>
                   <ActionBtn onClick={addLS} color="amber" isDark={isDark}>
-                    {newLump.originalMonth !== undefined ? "Save" : "Add"}
+                    {newLump.originalId !== undefined ? "Save" : "Add"}
                   </ActionBtn>
                   <CancelBtn
                     onClick={() => {
                       setShowLump(false);
-                      setNewLump({ month: 0, amount: "" });
+                      setNewLump({ month: 0, day: 1, amount: "" });
                     }}
                     isDark={isDark}
                   />
@@ -1319,13 +1527,43 @@ export default function LoanCalculator() {
 
         {/* ── Schedule Table ───────────────────────────────────────────────── */}
         <div className={`${card} overflow-hidden`}>
-          <div className="px-3 sm:px-4 py-2.5 flex items-center justify-between border-b border-white/[0.06]">
-            <h2 className={`text-xs font-semibold uppercase tracking-wide ${heading}`}>
-              Amortization Schedule
-            </h2>
-            <span className={`text-[11px] ${subtext}`}>
-              {schedule.filter((r) => r.emi > 0).length} payments
-            </span>
+          <div className="px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06]">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <h2 className={`text-xs font-semibold uppercase tracking-wide ${heading}`}>
+                Amortization Schedule
+              </h2>
+              <button
+                type="button"
+                onClick={toggleAllMonths}
+                className={`text-[10px] px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                  isDark
+                    ? "bg-white/10 hover:bg-white/20 text-gray-200"
+                    : "bg-gray-200 hover:bg-gray-300 text-gray-800"
+                }`}
+                title="Expand or collapse all months to see day-wise calculations"
+              >
+                {schedule.length > 0 && schedule.every((r) => expandedMonths[r.m])
+                  ? "Collapse All"
+                  : "Expand All Days"}
+              </button>
+            </div>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <span className={`text-[11px] ${subtext}`}>
+                {schedule.filter((r) => r.emi > 0).length} payments
+              </span>
+              <button
+                type="button"
+                onClick={exportDailyData}
+                className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                  isDark
+                    ? "bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                    : "bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200"
+                }`}
+                title="Export complete Day-Wise Granular Schedule CSV"
+              >
+                <Download className="w-3 h-3" /> Daily CSV
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -1360,137 +1598,301 @@ export default function LoanCalculator() {
               <tbody>
                 {schedule.map((r) => {
                   const isCur = r.m === cm,
-                    isPaid = r.m < cm;
+                    isPaid = r.m < cm,
+                    isExpanded = !!expandedMonths[r.m];
                   return (
-                    <tr
-                      key={r.m}
-                      className={`border-t transition-colors ${divider} ${
-                        isCur
-                          ? isDark
-                            ? "bg-sky-500/[0.08]"
-                            : "bg-sky-50"
-                          : r.payType === "lump"
+                    <Fragment key={r.m}>
+                      <tr
+                        className={`border-t transition-colors ${divider} ${
+                          isCur
                             ? isDark
-                              ? "bg-amber-500/[0.04]"
-                              : "bg-amber-50/60"
-                            : r.payType === "custom"
+                              ? "bg-sky-500/[0.08]"
+                              : "bg-sky-50"
+                            : r.payType === "lump"
                               ? isDark
-                                ? "bg-violet-500/[0.04]"
-                                : "bg-violet-50/60"
-                              : isDark
-                                ? "hover:bg-white/[0.02]"
-                                : "hover:bg-gray-50"
-                      }`}
-                    >
-                      <td
-                        className={`px-2 py-1.5 font-medium ${heading} whitespace-nowrap`}
+                                ? "bg-amber-500/[0.04]"
+                                : "bg-amber-50/60"
+                              : r.payType === "custom"
+                                ? isDark
+                                  ? "bg-violet-500/[0.04]"
+                                  : "bg-violet-50/60"
+                                : isDark
+                                  ? "hover:bg-white/[0.02]"
+                                  : "hover:bg-gray-50"
+                        }`}
                       >
-                        {r.m}
-                        {isCur && (
-                          <span className="ml-1 px-1 py-0.2 bg-sky-500 text-white rounded-sm text-[8px] font-bold tracking-wide">
-                            NOW
-                          </span>
-                        )}
-                      </td>
-                      <td
-                        className={`px-2 py-1.5 ${subtext} whitespace-nowrap`}
-                      >
-                        {r.date}
-                      </td>
-                      <td className="px-2 py-1.5">
-                        {r.emi > 0 ? (
-                          isPaid ? (
-                            <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              ✓ Paid
-                            </span>
-                          ) : isCur ? (
-                            <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                              Current
-                            </span>
-                          ) : (
-                            <span
-                              className={`px-1.5 py-0.5 rounded-sm text-[9px] font-semibold ${isDark ? "bg-white/[0.04] text-gray-500 border border-white/[0.06]" : "bg-gray-100 text-gray-400 border border-gray-200"}`}
+                        <td
+                          className={`px-2 py-1.5 font-medium ${heading} whitespace-nowrap`}
+                        >
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => toggleMonth(r.m)}
+                              className={`p-0.5 rounded cursor-pointer transition-colors ${
+                                isDark
+                                  ? "hover:bg-white/10 text-gray-300"
+                                  : "hover:bg-gray-200 text-gray-600"
+                              }`}
+                              title={isExpanded ? "Collapse day-wise details" : "Expand day-wise details"}
                             >
-                              Pending
-                            </span>
-                          )
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-sky-400 font-mono">
-                        {r.disbAmt > 0 ? (
-                          fmt(r.disbAmt)
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      <td
-                        className={`px-2 py-1.5 font-mono font-semibold ${heading}`}
-                      >
-                        {r.emi > 0 ? (
-                          fmt(r.emi)
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      <td className={`px-2 py-1.5 font-mono ${subtext}`}>
-                        {r.stdEmi > 0 ? (
-                          fmt(r.stdEmi)
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-violet-400 font-mono">
-                        {r.customEmiAmt ? (
-                          fmt(r.customEmiAmt)
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-amber-400 font-mono">
-                        {r.lumpAmt ? (
-                          fmt(r.lumpAmt)
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-teal-400 font-mono">
-                        {r.prinPay > 0 ? (
-                          fmt(r.prinPay)
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-amber-400 font-mono">
-                        {r.intPay > 0 ? (
-                          fmt(r.intPay)
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-emerald-400 font-mono font-semibold">
-                        {r.interestSaved > 0 ? (
-                          fmt(r.interestSaved)
-                        ) : (
-                          <span className={subtext}>—</span>
-                        )}
-                      </td>
-                      {hasOd && (
-                        <td className="px-2 py-1.5 text-emerald-400 font-mono">
-                          {r.odBal > 0 ? (
-                            fmt(r.odBal)
+                              {isExpanded ? (
+                                <ChevronDown className="w-3.5 h-3.5 text-sky-400" />
+                              ) : (
+                                <ChevronRight className="w-3.5 h-3.5 opacity-60 hover:opacity-100" />
+                              )}
+                            </button>
+                            <span>{r.m}</span>
+                            {isCur && (
+                              <span className="ml-1 px-1 py-0.2 bg-sky-500 text-white rounded-sm text-[8px] font-bold tracking-wide">
+                                NOW
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td
+                          className={`px-2 py-1.5 ${subtext} whitespace-nowrap`}
+                        >
+                          {r.date}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          {r.emi > 0 ? (
+                            isPaid ? (
+                              <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                ✓ Paid
+                              </span>
+                            ) : isCur ? (
+                              <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                Current
+                              </span>
+                            ) : (
+                              <span
+                                className={`px-1.5 py-0.5 rounded-sm text-[9px] font-semibold ${isDark ? "bg-white/[0.04] text-gray-500 border border-white/[0.06]" : "bg-gray-100 text-gray-400 border border-gray-200"}`}
+                              >
+                                Pending
+                              </span>
+                            )
                           ) : (
                             <span className={subtext}>—</span>
                           )}
                         </td>
+                        <td className="px-2 py-1.5 text-sky-400 font-mono">
+                          {r.disbAmt > 0 ? (
+                            fmt(r.disbAmt)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                        <td
+                          className={`px-2 py-1.5 font-mono font-semibold ${heading}`}
+                        >
+                          {r.emi > 0 ? (
+                            fmt(r.emi)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                        <td className={`px-2 py-1.5 font-mono ${subtext}`}>
+                          {r.stdEmi > 0 ? (
+                            fmt(r.stdEmi)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-violet-400 font-mono">
+                          {r.customEmiAmt ? (
+                            fmt(r.customEmiAmt)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-amber-400 font-mono">
+                          {r.lumpAmt ? (
+                            fmt(r.lumpAmt)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-teal-400 font-mono">
+                          {r.prinPay > 0 ? (
+                            fmt(r.prinPay)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-amber-400 font-mono">
+                          {r.intPay > 0 ? (
+                            fmt(r.intPay)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-emerald-400 font-mono font-semibold">
+                          {r.interestSaved > 0 ? (
+                            fmt(r.interestSaved)
+                          ) : (
+                            <span className={subtext}>—</span>
+                          )}
+                        </td>
+                        {hasOd && (
+                          <td className="px-2 py-1.5 text-emerald-400 font-mono">
+                            {r.odBal > 0 ? (
+                              fmt(r.odBal)
+                            ) : (
+                              <span className={subtext}>—</span>
+                            )}
+                          </td>
+                        )}
+                        <td
+                          className={`px-2 py-1.5 font-mono font-semibold ${heading}`}
+                        >
+                          {fmt(r.remaining)}
+                        </td>
+                      </tr>
+
+                      {/* Day-Wise Granular Breakdown Sub-Table */}
+                      {isExpanded && r.days && r.days.length > 0 && (
+                        <tr className={`${isDark ? "bg-[#090b0e]" : "bg-gray-50/70"}`}>
+                          <td colSpan={hasOd ? 13 : 12} className="p-0">
+                            <div className={`p-3 border-y ${divider}`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-semibold tracking-wide uppercase text-sky-400">
+                                    Month {r.m} ({r.date}) — Day-Wise Granular Breakdown
+                                  </span>
+                                  <span className={`text-[10px] ${subtext}`}>
+                                    ({r.days.length} days · {r.days.filter((d) => (d.events?.length || 0) > 0).length} active events)
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="overflow-x-auto max-h-[360px] overflow-y-auto rounded border border-white/5 shadow-inner">
+                                <table className="w-full text-[11px]">
+                                  <thead className={`sticky top-0 ${isDark ? "bg-gray-900" : "bg-gray-100"} shadow-sm`}>
+                                    <tr className={`border-b ${divider}`}>
+                                      <th className={`px-2 py-1.5 text-left font-semibold text-[10px] ${subtext}`}>Day / Date</th>
+                                      <th className={`px-2 py-1.5 text-left font-semibold text-[10px] ${subtext}`}>Events</th>
+                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Disb</th>
+                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Payment / EMI</th>
+                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Lump Sum</th>
+                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Prin Repaid</th>
+                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Daily Interest</th>
+                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Saved</th>
+                                      {hasOd && <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>OD Bal</th>}
+                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Net Balance</th>
+                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Closing Balance</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {r.days.map((d) => {
+                                      const hasEvent = d.events && d.events.length > 0;
+                                      return (
+                                        <tr
+                                          key={d.day}
+                                          className={`border-b transition-colors ${divider} ${
+                                            hasEvent
+                                              ? isDark
+                                                ? "bg-sky-500/[0.07]"
+                                                : "bg-sky-50/50"
+                                              : isDark
+                                                ? "hover:bg-white/[0.02]"
+                                                : "hover:bg-gray-100/50"
+                                          }`}
+                                        >
+                                          <td className="px-2 py-1 whitespace-nowrap font-mono text-[10px]">
+                                            <span className="font-semibold text-sky-400">D{d.day}</span>{" "}
+                                            <span className={subtext}>({d.date.split(",")[0]})</span>
+                                          </td>
+                                          <td className="px-2 py-1">
+                                            {d.events && d.events.length > 0 ? (
+                                              <div className="flex flex-wrap gap-1">
+                                                {d.events.map((ev, i) => (
+                                                  <span
+                                                    key={i}
+                                                    className="px-1.5 py-0.2 rounded text-[9px] font-medium bg-sky-500/10 text-sky-300 border border-sky-500/20"
+                                                  >
+                                                    {ev}
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <span className={subtext}>—</span>
+                                            )}
+                                          </td>
+                                          <td className="px-2 py-1 text-right font-mono text-sky-400">
+                                            {d.disbAmt > 0 ? fmt(d.disbAmt) : <span className={subtext}>—</span>}
+                                          </td>
+                                          <td className="px-2 py-1 text-right font-mono">
+                                            {d.emiAmt > 0 ? fmt(d.emiAmt) : <span className={subtext}>—</span>}
+                                          </td>
+                                          <td className="px-2 py-1 text-right font-mono text-amber-400">
+                                            {d.lumpAmt > 0 ? fmt(d.lumpAmt) : <span className={subtext}>—</span>}
+                                          </td>
+                                          <td className="px-2 py-1 text-right font-mono text-teal-400">
+                                            {d.prinPay > 0 ? fmt(d.prinPay) : <span className={subtext}>—</span>}
+                                          </td>
+                                          <td className="px-2 py-1 text-right font-mono text-amber-400">
+                                            {d.intPay > 0 ? fmt(d.intPay) : <span className={subtext}>—</span>}
+                                          </td>
+                                          <td className="px-2 py-1 text-right font-mono text-emerald-400">
+                                            {d.interestSaved > 0 ? fmt(d.interestSaved) : <span className={subtext}>—</span>}
+                                          </td>
+                                          {hasOd && (
+                                            <td className="px-2 py-1 text-right font-mono text-emerald-400">
+                                              {d.odBal > 0 ? fmt(d.odBal) : <span className={subtext}>—</span>}
+                                            </td>
+                                          )}
+                                          <td className="px-2 py-1 text-right font-mono">
+                                            {fmt(d.netPrincipal)}
+                                          </td>
+                                          <td className="px-2 py-1 text-right font-mono font-semibold">
+                                            {fmt(d.balance)}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                  <tfoot className={`font-semibold ${isDark ? "bg-white/[0.03]" : "bg-gray-100"}`}>
+                                    <tr className={`border-t ${divider}`}>
+                                      <td className="px-2 py-1.5" colSpan={2}>
+                                        Month {r.m} Totals
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-sky-400">
+                                        {r.disbAmt > 0 ? fmt(r.disbAmt) : "—"}
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono">
+                                        {r.emi > 0 ? fmt(r.emi) : "—"}
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-amber-400">
+                                        {r.lumpAmt ? fmt(r.lumpAmt) : "—"}
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-teal-400">
+                                        {fmt(r.prinPay)}
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-amber-400">
+                                        {fmt(r.intPay)}
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono text-emerald-400">
+                                        {r.interestSaved > 0 ? fmt(r.interestSaved) : "—"}
+                                      </td>
+                                      {hasOd && (
+                                        <td className="px-2 py-1.5 text-right font-mono text-emerald-400">
+                                          {r.odBal > 0 ? fmt(r.odBal) : "—"}
+                                        </td>
+                                      )}
+                                      <td className="px-2 py-1.5 text-right font-mono">
+                                        —
+                                      </td>
+                                      <td className="px-2 py-1.5 text-right font-mono font-bold">
+                                        {fmt(r.remaining)}
+                                      </td>
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                      <td
-                        className={`px-2 py-1.5 font-mono font-semibold ${heading}`}
-                      >
-                        {fmt(r.remaining)}
-                      </td>
-                    </tr>
+                    </Fragment>
                   );
                 })}
               </tbody>
