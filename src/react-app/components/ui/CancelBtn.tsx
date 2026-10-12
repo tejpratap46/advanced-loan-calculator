@@ -11,10 +11,16 @@ export function CancelBtn({
 }: CancelBtnProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={`p-1 rounded-sm transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-500 hover:text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-400 hover:text-gray-600"}`}
+      className={`p-1.5 rounded-xl border transition-all cursor-pointer ${
+        isDark
+          ? "bg-slate-800/80 hover:bg-slate-700/80 text-slate-400 hover:text-slate-200 border-slate-700"
+          : "bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 border-slate-200"
+      }`}
+      title="Cancel"
     >
-      <X size={12} />
+      <X size={14} />
     </button>
   );
 }

@@ -1,15 +1,21 @@
 export interface Dispersal {
+  id?: string;
   month: number;
+  day?: number;
   amount: number;
 }
 
 export interface CustomEmi {
+  id?: string;
   fromMonth: number;
+  day?: number;
   amount: number;
 }
 
 export interface LumpSum {
+  id?: string;
   month: number;
+  day?: number;
   amount: number;
 }
 
@@ -39,6 +45,22 @@ export interface Loan {
   data: LoanData;
 }
 
+export interface DayDetail {
+  day: number;
+  date: string;
+  fullDate: string;
+  disbAmt: number;
+  emiAmt: number;
+  lumpAmt: number;
+  prinPay: number;
+  intPay: number;
+  interestSaved: number;
+  odBal: number;
+  netPrincipal: number;
+  balance: number;
+  events?: string[];
+}
+
 export interface ScheduleRow {
   m: number;
   date: string;
@@ -54,6 +76,7 @@ export interface ScheduleRow {
   lumpAmt: number | null;
   interestSaved: number;
   odBal: number;
+  days?: DayDetail[];
 }
 
 export interface Toast {

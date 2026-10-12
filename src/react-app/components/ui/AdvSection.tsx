@@ -1,11 +1,12 @@
 import React, { useState } from "react";
-import { X } from "lucide-react";
+import { X, ChevronDown, ChevronRight, Plus } from "lucide-react";
 
 interface AdvSectionProps {
   title: string;
   count: number;
   accentClass: string;
   isDark: boolean;
+  icon?: React.ReactNode;
   tags: {
     label: string;
     color: string;
@@ -23,68 +24,124 @@ export function AdvSection({
   count,
   accentClass,
   isDark,
+  icon,
   tags,
   showForm,
   onAdd,
   formContent,
 }: AdvSectionProps) {
   const [open, setOpen] = useState(false);
+
   return (
-    <div>
+    <div
+      className={`rounded-xl border transition-all duration-200 overflow-hidden ${
+        isDark
+          ? "bg-slate-900/40 border-slate-800/80 hover:border-slate-700/80"
+          : "bg-slate-50/70 border-slate-200/80 hover:border-slate-300"
+      }`}
+    >
       <button
+        type="button"
         onClick={() => setOpen((p) => !p)}
-        className={`flex items-center gap-2 text-xs font-semibold mb-2 ${isDark ? "text-gray-300 hover:text-gray-100" : "text-gray-600 hover:text-gray-900"} transition-colors`}
+        className="w-full flex items-center justify-between p-3 cursor-pointer text-left transition-colors"
       >
-        <span
-          className={`transition-transform ${open ? "rotate-90" : ""} inline-block`}
-        >
-          ›
-        </span>
-        <span>{title}</span>
-        {count > 0 && (
+        <div className="flex items-center gap-2.5">
           <span
-            className={`px-1.5 py-0.5 rounded-sm text-[10px] font-bold ${accentClass} ${isDark ? "bg-white/[0.06]" : "bg-gray-100"}`}
+            className={`p-1 rounded-md transition-colors ${
+              isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600 shadow-sm"
+            }`}
           >
-            {count}
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>
-        )}
+          {icon && <span className="opacity-80">{icon}</span>}
+          <span
+            className={`text-xs font-semibold uppercase tracking-wider ${
+              isDark ? "text-slate-200" : "text-slate-800"
+            }`}
+          >
+            {title}
+          </span>
+          {count > 0 && (
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${accentClass} ${
+                isDark ? "bg-white/[0.05]" : "bg-white shadow-xs"
+              }`}
+            >
+              {count} {count === 1 ? "entry" : "entries"}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {!open && tags.length > 0 && (
+            <span className={`text-[11px] truncate max-w-[200px] hidden sm:inline ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              {tags[0].label} {tags.length > 1 ? `+${tags.length - 1} more` : ""}
+            </span>
+          )}
+        </div>
       </button>
+
       {open && (
-        <div className="pl-2.5">
+        <div
+          className={`p-3 pt-0 border-t ${
+            isDark ? "border-slate-800/80" : "border-slate-200/80"
+          }`}
+        >
           {tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-1.5">
+            <div className="flex flex-wrap gap-1.5 my-2.5">
               {tags.map((t) => (
                 <span
                   key={t.label}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[10px] font-medium border ${t.color}`}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs transition-all ${t.color}`}
                 >
                   <span
                     className={
-                      t.onClick ? "cursor-pointer hover:underline" : ""
+                      t.onClick
+                        ? "cursor-pointer hover:underline underline-offset-2"
+                        : ""
                     }
                     onClick={t.onClick}
                   >
                     {t.label}
                   </span>
                   <button
+                    type="button"
                     onClick={t.onRemove}
-                    className="hover:opacity-60 transition-opacity ml-0.5"
+                    className="hover:opacity-70 transition-opacity p-0.5 rounded"
+                    title="Remove entry"
                   >
-                    <X size={10} />
+                    <X size={12} />
                   </button>
                 </span>
               ))}
             </div>
           )}
+
           {!showForm ? (
-            <button
-              onClick={onAdd}
-              className={`px-2.5 py-1 rounded-sm text-[11px] font-semibold transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-300 border border-white/[0.08]" : "bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200"}`}
-            >
-              + Add
-            </button>
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={onAdd}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-xs border ${
+                  isDark
+                    ? "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 hover:border-slate-600"
+                    : "bg-white hover:bg-slate-50 text-slate-700 border-slate-300 hover:border-slate-400"
+                }`}
+              >
+                <Plus size={13} />
+                <span>Add {title.slice(0, 15)}</span>
+              </button>
+            </div>
           ) : (
-            formContent
+            <div
+              className={`mt-2 p-3 rounded-xl border ${
+                isDark
+                  ? "bg-slate-900/80 border-slate-800"
+                  : "bg-white border-slate-200 shadow-sm"
+              }`}
+            >
+              {formContent}
+            </div>
           )}
         </div>
       )}

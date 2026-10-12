@@ -1,4 +1,13 @@
-import { ScheduleRow, MiscExpense } from "../types";
+import type { ScheduleRow, MiscExpense } from "../types/index.ts";
+
+const escapeCSVCell = (val: unknown): string => {
+  if (val === null || val === undefined) return '""';
+  let str = String(val);
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = "'" + str;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+};
 
 export const generateCSV = (
   schedule: ScheduleRow[],
@@ -36,15 +45,15 @@ export const generateCSV = (
       r.date,
       status,
       r.disbAmt || "",
-      r.emi || "",
-      r.stdEmi || "",
+      r.emi ? Math.round(r.emi) : "",
+      r.stdEmi ? Math.round(r.stdEmi) : "",
       r.customEmiAmt || "",
       r.lumpAmt || "",
-      r.prinPay || "",
-      r.intPay || "",
-      r.interestSaved || "",
+      r.prinPay ? Math.round(r.prinPay) : "",
+      r.intPay ? Math.round(r.intPay) : "",
+      r.interestSaved ? Math.round(r.interestSaved) : "",
       r.odBal || "",
-      r.remaining,
+      Math.round(r.remaining),
     ];
   });
 
@@ -52,26 +61,17 @@ export const generateCSV = (
     "TOTALS",
     "",
     "",
-    totals.d,
-    totals.e,
+    Math.round(totals.d),
+    Math.round(totals.e),
     "",
     "",
     "",
-    totals.p,
-    totals.i,
-    totals.s,
+    Math.round(totals.p),
+    Math.round(totals.i),
+    Math.round(totals.s),
     "",
     "",
   ];
-
-  const escapeCSVCell = (val: any): string => {
-    if (val === null || val === undefined) return '""';
-    let str = String(val);
-    if (/^[=+\-@\t\r]/.test(str)) {
-      str = "'" + str;
-    }
-    return `"${str.replace(/"/g, '""')}"`;
-  };
 
   let csvRows = [headers, ...rows, totalRow];
 
@@ -83,7 +83,7 @@ export const generateCSV = (
       e.date,
       e.amount,
       e.comments,
-      "", "", "", "", "", "", "", "", "", ""
+      "", "", "", "", "", "", "", "", "", "",
     ]);
     const totalMiscAmount = miscExpenses.reduce((sum, item) => sum + item.amount, 0);
     const miscTotalRow = ["TOTAL MISC CHARGES", totalMiscAmount, "", "", "", "", "", "", "", "", "", "", ""];
@@ -103,6 +103,49 @@ export const generateCSV = (
     .join("\r\n");
 
   return csvContent;
+};
+
+export const generateDailyCSV = (schedule: ScheduleRow[]) => {
+  const headers = [
+    "Month",
+    "Day",
+    "Date",
+    "Events",
+    "Disbursement",
+    "EMI Payment",
+    "Lump Sum",
+    "Principal Paid",
+    "Daily Interest",
+    "Interest Saved",
+    "OD Offset",
+    "Net Principal",
+    "Balance",
+  ];
+
+  const rows: (string | number)[][] = [];
+  for (const row of schedule) {
+    if (!row.days || row.days.length === 0) continue;
+    for (const d of row.days) {
+      rows.push([
+        row.m,
+        d.day,
+        d.date,
+        (d.events || []).join("; "),
+        d.disbAmt || "",
+        d.emiAmt ? Math.round(d.emiAmt) : "",
+        d.lumpAmt || "",
+        d.prinPay ? Math.round(d.prinPay) : "",
+        d.intPay ? d.intPay.toFixed(2) : "0.00",
+        d.interestSaved ? d.interestSaved.toFixed(2) : "0.00",
+        d.odBal || "",
+        Math.round(d.netPrincipal),
+        Math.round(d.balance),
+      ]);
+    }
+  }
+
+  const csvRows = [headers, ...rows];
+  return csvRows.map((r) => r.map(escapeCSVCell).join(",")).join("\r\n");
 };
 
 export const downloadFile = (content: string, fileName: string) => {
