@@ -1,0 +1,1321 @@
+import { useState } from "react";
+import {
+  Wallet,
+  Percent,
+  PiggyBank,
+  DollarSign,
+  Receipt,
+  X,
+  LayoutGrid,
+  Columns,
+} from "lucide-react";
+import type { LoanData, Dispersal, CustomEmi, LumpSum, MiscExpense } from "../../types";
+import { NumInput } from "../ui/NumInput";
+import { StrInput } from "../ui/StrInput";
+import { ActionBtn } from "../ui/ActionBtn";
+import { CancelBtn } from "../ui/CancelBtn";
+
+interface AdvancedStrategiesProps {
+  data: LoanData;
+  updateData: (u: Partial<LoanData>) => void;
+  currency: string;
+  locale?: string;
+  isDark: boolean;
+  getResolvedDate: (monthNum: number, dayNum: number) => string;
+}
+
+type StrategyTab = "dispersals" | "customEmis" | "lumpSums" | "overdraft" | "misc";
+
+export function AdvancedStrategies({
+  data,
+  updateData,
+  currency,
+  locale = "en-US",
+  isDark,
+  getResolvedDate,
+}: AdvancedStrategiesProps) {
+  const [activeTab, setActiveTab] = useState<StrategyTab>("dispersals");
+  const [layoutMode, setLayoutMode] = useState<"workbench" | "grid">("workbench");
+
+  const fmt = (v: number) =>
+    new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(v);
+
+  // ── Sub-form states ────────────────────────────────────────────────────────
+  const [newDisp, setNewDisp] = useState<{
+    id?: string;
+    month: number;
+    day: number;
+    amount: number;
+    originalId?: string;
+  }>({ month: 1, day: 1, amount: 0 });
+
+  const [newEmi, setNewEmi] = useState<{
+    id?: string;
+    fromMonth: number;
+    day: number;
+    amount: string;
+    originalId?: string;
+  }>({ fromMonth: 1, day: 1, amount: "" });
+
+  const [newLump, setNewLump] = useState<{
+    id?: string;
+    month: number;
+    day: number;
+    amount: string;
+    originalId?: string;
+  }>({ month: 0, day: 1, amount: "" });
+
+  const [newOd, setNewOd] = useState<{
+    fromMonth: number;
+    amount: string;
+    originalMonth?: number;
+  }>({ fromMonth: 1, amount: "" });
+
+  const [newMisc, setNewMisc] = useState<{
+    id?: string;
+    date: string;
+    amount: string;
+    comments: string;
+    originalId?: string;
+  }>({
+    date: new Date().toISOString().split("T")[0],
+    amount: "",
+    comments: "",
+  });
+
+  // ── Strategy action handlers ───────────────────────────────────────────────
+  const addDisp = () => {
+    if (newDisp.month < 1 || newDisp.month > data.years * 12 || newDisp.amount <= 0)
+      return;
+    const day = Math.min(31, Math.max(1, newDisp.day || 1));
+    const current = data.dispersals || [];
+    let updated: Dispersal[];
+    if (newDisp.originalId) {
+      updated = current.map((d) =>
+        (d.id && d.id === newDisp.originalId) ||
+        (!d.id && `${d.month}-${d.day || 1}` === newDisp.originalId)
+          ? {
+              id: d.id || newDisp.originalId,
+              month: newDisp.month,
+              day,
+              amount: newDisp.amount,
+            }
+          : d,
+      );
+    } else {
+      const newItem: Dispersal = {
+        id: `disp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        month: newDisp.month,
+        day,
+        amount: newDisp.amount,
+      };
+      updated = [...current, newItem];
+    }
+    updateData({
+      dispersals: updated.sort(
+        (a, b) => a.month - b.month || (a.day || 1) - (b.day || 1),
+      ),
+    });
+    setNewDisp({ month: 1, day: 1, amount: 0 });
+  };
+
+  const addCEmi = () => {
+    const a = parseFloat(newEmi.amount);
+    if (!a || a <= 0 || newEmi.fromMonth < 1) return;
+    const day = Math.min(31, Math.max(1, newEmi.day || 1));
+    const current = data.customEmis || [];
+    let updated: CustomEmi[];
+    if (newEmi.originalId) {
+      updated = current.map((e) =>
+        (e.id && e.id === newEmi.originalId) ||
+        (!e.id && `${e.fromMonth}-${e.day || 1}` === newEmi.originalId)
+          ? {
+              id: e.id || newEmi.originalId,
+              fromMonth: newEmi.fromMonth,
+              day,
+              amount: a,
+            }
+          : e,
+      );
+    } else {
+      const newItem: CustomEmi = {
+        id: `emi-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        fromMonth: newEmi.fromMonth,
+        day,
+        amount: a,
+      };
+      updated = [...current, newItem];
+    }
+    updateData({
+      customEmis: updated.sort(
+        (a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1),
+      ),
+    });
+    setNewEmi({ fromMonth: 1, day: 1, amount: "" });
+  };
+
+  const addLS = () => {
+    const a = parseFloat(newLump.amount);
+    const m = newLump.month;
+    if (!a || a <= 0 || m < 0) return;
+    const day = Math.min(31, Math.max(1, newLump.day || 1));
+    const current = data.lumpSums || [];
+    let updated: LumpSum[];
+    if (newLump.originalId) {
+      updated = current.map((l) =>
+        (l.id && l.id === newLump.originalId) ||
+        (!l.id && `${l.month}-${l.day || 1}` === newLump.originalId)
+          ? {
+              id: l.id || newLump.originalId,
+              month: m,
+              day,
+              amount: a,
+            }
+          : l,
+      );
+    } else {
+      const newItem: LumpSum = {
+        id: `lump-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        month: m,
+        day,
+        amount: a,
+      };
+      updated = [...current, newItem];
+    }
+    updateData({
+      lumpSums: updated.sort(
+        (a, b) => a.month - b.month || (a.day || 1) - (b.day || 1),
+      ),
+    });
+    setNewLump({ month: 0, day: 1, amount: "" });
+  };
+
+  const addOd = () => {
+    const a = parseFloat(newOd.amount);
+    if (isNaN(a) || a < 0) return;
+    const item = { fromMonth: newOd.fromMonth, amount: a };
+    const current = data.customOds || [];
+    updateData({
+      customOds: [
+        ...current.filter(
+          (o) => o.fromMonth !== (newOd.originalMonth ?? newOd.fromMonth),
+        ),
+        item,
+      ].sort((a, b) => a.fromMonth - b.fromMonth),
+    });
+    setNewOd({ fromMonth: 1, amount: "" });
+  };
+
+  const addMisc = () => {
+    const amt = parseFloat(newMisc.amount);
+    if (isNaN(amt) || amt <= 0 || !newMisc.date) return;
+    const current = data.miscExpenses || [];
+    let updated: MiscExpense[];
+    if (newMisc.originalId) {
+      updated = current.map((m) =>
+        m.id === newMisc.originalId
+          ? {
+              id: m.id,
+              date: newMisc.date,
+              amount: amt,
+              comments: newMisc.comments || "",
+            }
+          : m,
+      );
+    } else {
+      const newItem: MiscExpense = {
+        id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
+        date: newMisc.date,
+        amount: amt,
+        comments: newMisc.comments || "",
+      };
+      updated = [...current, newItem];
+    }
+    updateData({ miscExpenses: updated });
+    setNewMisc({
+      date: new Date().toISOString().split("T")[0],
+      amount: "",
+      comments: "",
+    });
+  };
+
+  // ── Tokens & Styling ───────────────────────────────────────────────────────
+  const subtext = isDark ? "text-slate-400" : "text-slate-500";
+  const heading = isDark ? "text-white" : "text-slate-900";
+  const divider = isDark ? "border-slate-800/80" : "border-slate-200";
+
+  // Strategy tabs metadata
+  const tabs = [
+    {
+      id: "dispersals" as StrategyTab,
+      label: "Disbursements",
+      shortLabel: "Disb",
+      icon: <Wallet size={14} />,
+      count: data.dispersals.length,
+      accentColor: "sky",
+      badgeClass: isDark
+        ? "bg-sky-500/10 text-sky-300 border-sky-500/20"
+        : "bg-sky-50 text-sky-700 border-sky-200",
+      activeTabStyle: isDark
+        ? "bg-sky-500/20 text-sky-300 border-sky-500/40 shadow-xs"
+        : "bg-sky-50 text-sky-800 border-sky-300 shadow-xs",
+    },
+    {
+      id: "customEmis" as StrategyTab,
+      label: "Custom EMI",
+      shortLabel: "EMI",
+      icon: <Percent size={14} />,
+      count: data.customEmis.length,
+      accentColor: "violet",
+      badgeClass: isDark
+        ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
+        : "bg-violet-50 text-violet-700 border-violet-200",
+      activeTabStyle: isDark
+        ? "bg-violet-500/20 text-violet-300 border-violet-500/40 shadow-xs"
+        : "bg-violet-50 text-violet-800 border-violet-300 shadow-xs",
+    },
+    {
+      id: "lumpSums" as StrategyTab,
+      label: "Lump Sum Prepayments",
+      shortLabel: "Lump",
+      icon: <PiggyBank size={14} />,
+      count: data.lumpSums.length,
+      accentColor: "amber",
+      badgeClass: isDark
+        ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+        : "bg-amber-50 text-amber-700 border-amber-200",
+      activeTabStyle: isDark
+        ? "bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-xs"
+        : "bg-amber-50 text-amber-800 border-amber-300 shadow-xs",
+    },
+    {
+      id: "overdraft" as StrategyTab,
+      label: "Offset / Overdraft",
+      shortLabel: "Offset",
+      icon: <DollarSign size={14} />,
+      count: (data.baselineOd ? 1 : 0) + (data.customOds?.length || 0),
+      accentColor: "emerald",
+      badgeClass: isDark
+        ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+        : "bg-emerald-50 text-emerald-700 border-emerald-200",
+      activeTabStyle: isDark
+        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-xs"
+        : "bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs",
+    },
+    {
+      id: "misc" as StrategyTab,
+      label: "Fees & Charges",
+      shortLabel: "Fees",
+      icon: <Receipt size={14} />,
+      count: data.miscExpenses?.length || 0,
+      accentColor: "orange",
+      badgeClass: isDark
+        ? "bg-orange-500/10 text-orange-300 border-orange-500/20"
+        : "bg-orange-50 text-orange-700 border-orange-200",
+      activeTabStyle: isDark
+        ? "bg-orange-500/20 text-orange-300 border-orange-500/40 shadow-xs"
+        : "bg-orange-50 text-orange-800 border-orange-300 shadow-xs",
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* ── Header: Title & Layout Switcher ──────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/5">
+        <div>
+          <h2 className={`text-sm font-bold uppercase tracking-wider ${heading}`}>
+            Advanced Financial Strategies
+          </h2>
+          <p className={`text-[11px] ${subtext}`}>
+            Configure staggered disbursements, custom EMI step-ups, prepayments, and offset savings
+          </p>
+        </div>
+
+        {/* View Layout Toggle: Horizontal Workbench vs Multi-column Grid */}
+        <div
+          className={`flex items-center p-0.5 rounded-xl border ${
+            isDark ? "bg-slate-900/80 border-slate-700/80" : "bg-slate-100 border-slate-200"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setLayoutMode("workbench")}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              layoutMode === "workbench"
+                ? "bg-sky-500 text-white shadow-xs"
+                : isDark
+                ? "text-slate-400 hover:text-white"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+            title="Compact horizontal workbench (Side-by-side active items & form)"
+          >
+            <Columns size={13} />
+            <span>Horizontal Workbench</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLayoutMode("grid")}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              layoutMode === "grid"
+                ? "bg-sky-500 text-white shadow-xs"
+                : isDark
+                ? "text-slate-400 hover:text-white"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+            title="Multi-column side-by-side grid"
+          >
+            <LayoutGrid size={13} />
+            <span>Side-by-Side Grid</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── MODE 1: HORIZONTAL WORKBENCH (Compact, High-Density) ──────────── */}
+      {layoutMode === "workbench" && (
+        <div className="space-y-4">
+          {/* Horizontal Segmented Tabs Navigation Bar */}
+          <div className="flex items-center gap-2 overflow-x-auto overflow-y-hidden py-1 no-scrollbar">
+            {tabs.map((t) => {
+              const isActive = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setActiveTab(t.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer ${
+                    isActive
+                      ? t.activeTabStyle
+                      : isDark
+                      ? "bg-slate-900/40 text-slate-400 border-slate-800/80 hover:bg-slate-800 hover:text-slate-200"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:text-slate-900 shadow-xs"
+                  }`}
+                >
+                  <span className="opacity-80">{t.icon}</span>
+                  <span>{t.label}</span>
+                  {t.count > 0 && (
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold border ${t.badgeClass}`}
+                    >
+                      {t.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Active Tab: 2-Column Horizontal Workbench (Left: Entries; Right: Inline Form) */}
+          <div
+            className={`p-4 rounded-2xl border transition-all ${
+              isDark
+                ? "bg-slate-900/40 border-slate-800/80"
+                : "bg-slate-50/70 border-slate-200/80"
+            }`}
+          >
+            {/* 1. DISBURSEMENTS TAB */}
+            {activeTab === "dispersals" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                {/* Left: Active Entries (5 cols) */}
+                <div className="lg:col-span-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                      Scheduled Disbursements ({data.dispersals.length})
+                    </span>
+                    <span className="text-xs font-mono font-bold text-sky-400">
+                      Total: {fmt(data.dispersals.reduce((s, d) => s + (d.amount || 0), 0))}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {data.dispersals.length === 0 ? (
+                      <span className={`text-xs italic ${subtext}`}>
+                        No staggered disbursements configured.
+                      </span>
+                    ) : (
+                      data.dispersals
+                        .sort((a, b) => a.month - b.month || (a.day || 1) - (b.day || 1))
+                        .map((d) => (
+                          <span
+                            key={d.id || `${d.month}-${d.day}`}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                              isDark
+                                ? "bg-sky-500/10 text-sky-300 border-sky-500/20"
+                                : "bg-sky-50 text-sky-700 border-sky-200"
+                            }`}
+                          >
+                            <span
+                              className="cursor-pointer hover:underline"
+                              onClick={() => {
+                                setNewDisp({
+                                  id: d.id,
+                                  month: d.month,
+                                  day: d.day || 1,
+                                  amount: d.amount,
+                                  originalId: d.id || `${d.month}-${d.day || 1}`,
+                                });
+                              }}
+                              title="Click to edit"
+                            >
+                              M{d.month} · D{d.day || 1}: {fmt(d.amount)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateData({
+                                  dispersals: data.dispersals.filter((x) =>
+                                    d.id
+                                      ? x.id !== d.id
+                                      : x.month !== d.month || (x.day || 1) !== (d.day || 1),
+                                  ),
+                                })
+                              }
+                              className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                              title="Remove"
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: Inline Add / Edit Form (7 cols) */}
+                <div
+                  className={`lg:col-span-7 p-3.5 rounded-xl border ${
+                    isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-semibold ${subtext}`}>
+                      {newDisp.originalId ? "Edit Disbursement" : "Add Staggered Tranche"}
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-lg font-mono border ${
+                        isDark
+                          ? "bg-sky-500/10 text-sky-300 border-sky-500/20"
+                          : "bg-sky-50 text-sky-700 border-sky-200"
+                      }`}
+                    >
+                      📅 {getResolvedDate(newDisp.month, newDisp.day)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <NumInput
+                      placeholder="Month"
+                      value={newDisp.month}
+                      onChange={(v) => setNewDisp({ ...newDisp, month: v })}
+                      onEnter={addDisp}
+                      isDark={isDark}
+                      min={1}
+                      max={data.years * 12}
+                    />
+                    <NumInput
+                      placeholder="Day (1-31)"
+                      value={newDisp.day}
+                      onChange={(v) =>
+                        setNewDisp({ ...newDisp, day: Math.min(31, Math.max(1, v)) })
+                      }
+                      onEnter={addDisp}
+                      isDark={isDark}
+                      min={1}
+                      max={31}
+                    />
+                    <NumInput
+                      placeholder="Amount"
+                      value={newDisp.amount}
+                      onChange={(v) => setNewDisp({ ...newDisp, amount: v })}
+                      onEnter={addDisp}
+                      isDark={isDark}
+                    />
+                    <ActionBtn onClick={addDisp} color="sky" isDark={isDark}>
+                      {newDisp.originalId ? "Save" : "Add Disbursement"}
+                    </ActionBtn>
+                    {newDisp.originalId && (
+                      <CancelBtn
+                        onClick={() => setNewDisp({ month: 1, day: 1, amount: 0 })}
+                        isDark={isDark}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 2. CUSTOM EMI TAB */}
+            {activeTab === "customEmis" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <div className="lg:col-span-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                      Custom EMI Overrides ({data.customEmis.length})
+                    </span>
+                    <span className={`text-xs ${subtext}`}>
+                      Step-up or step-down payments
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {data.customEmis.length === 0 ? (
+                      <span className={`text-xs italic ${subtext}`}>
+                        Standard EMI applies every month. Add overrides below.
+                      </span>
+                    ) : (
+                      data.customEmis
+                        .sort((a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1))
+                        .map((e) => (
+                          <span
+                            key={e.id || `${e.fromMonth}-${e.day}`}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                              isDark
+                                ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
+                                : "bg-violet-50 text-violet-700 border-violet-200"
+                            }`}
+                          >
+                            <span
+                              className="cursor-pointer hover:underline"
+                              onClick={() => {
+                                setNewEmi({
+                                  id: e.id,
+                                  fromMonth: e.fromMonth,
+                                  day: e.day || 1,
+                                  amount: e.amount.toString(),
+                                  originalId: e.id || `${e.fromMonth}-${e.day || 1}`,
+                                });
+                              }}
+                              title="Click to edit"
+                            >
+                              From M{e.fromMonth} · D{e.day || 1}: {fmt(e.amount)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateData({
+                                  customEmis: data.customEmis.filter((x) =>
+                                    e.id
+                                      ? x.id !== e.id
+                                      : x.fromMonth !== e.fromMonth ||
+                                        (x.day || 1) !== (e.day || 1),
+                                  ),
+                                })
+                              }
+                              className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                              title="Remove"
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  className={`lg:col-span-7 p-3.5 rounded-xl border ${
+                    isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-semibold ${subtext}`}>
+                      {newEmi.originalId ? "Edit Custom EMI" : "Add Step-Up / Override EMI"}
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-lg font-mono border ${
+                        isDark
+                          ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
+                          : "bg-violet-50 text-violet-700 border-violet-200"
+                      }`}
+                    >
+                      📅 {getResolvedDate(newEmi.fromMonth, newEmi.day)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <NumInput
+                      placeholder="From Month"
+                      value={newEmi.fromMonth}
+                      onChange={(v) => setNewEmi({ ...newEmi, fromMonth: v })}
+                      onEnter={addCEmi}
+                      isDark={isDark}
+                      min={1}
+                      max={data.years * 12}
+                    />
+                    <NumInput
+                      placeholder="Day (1-31)"
+                      value={newEmi.day}
+                      onChange={(v) =>
+                        setNewEmi({ ...newEmi, day: Math.min(31, Math.max(1, v)) })
+                      }
+                      onEnter={addCEmi}
+                      isDark={isDark}
+                      min={1}
+                      max={31}
+                    />
+                    <StrInput
+                      placeholder="New EMI Amount"
+                      value={newEmi.amount}
+                      onChange={(v) => setNewEmi({ ...newEmi, amount: v })}
+                      onEnter={addCEmi}
+                      isDark={isDark}
+                    />
+                    <ActionBtn onClick={addCEmi} color="violet" isDark={isDark}>
+                      {newEmi.originalId ? "Save" : "Set Custom EMI"}
+                    </ActionBtn>
+                    {newEmi.originalId && (
+                      <CancelBtn
+                        onClick={() => setNewEmi({ fromMonth: 1, day: 1, amount: "" })}
+                        isDark={isDark}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 3. LUMP SUM TAB */}
+            {activeTab === "lumpSums" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <div className="lg:col-span-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                      Prepayments & Down Payments ({data.lumpSums.length})
+                    </span>
+                    <span className="text-xs font-mono font-bold text-amber-400">
+                      Total: {fmt(data.lumpSums.reduce((s, l) => s + (l.amount || 0), 0))}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {data.lumpSums.length === 0 ? (
+                      <span className={`text-xs italic ${subtext}`}>
+                        No prepayments configured. Add one to accelerate loan payoff!
+                      </span>
+                    ) : (
+                      data.lumpSums
+                        .sort((a, b) => a.month - b.month || (a.day || 1) - (b.day || 1))
+                        .map((l) => (
+                          <span
+                            key={l.id || `${l.month}-${l.day}`}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                              isDark
+                                ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                                : "bg-amber-50 text-amber-700 border-amber-200"
+                            }`}
+                          >
+                            <span
+                              className="cursor-pointer hover:underline"
+                              onClick={() => {
+                                setNewLump({
+                                  id: l.id,
+                                  month: l.month,
+                                  day: l.day || 1,
+                                  amount: l.amount.toString(),
+                                  originalId: l.id || `${l.month}-${l.day || 1}`,
+                                });
+                              }}
+                              title="Click to edit"
+                            >
+                              {l.month === 0 ? "Down Payment" : `M${l.month} · D${l.day || 1}`}: {fmt(l.amount)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateData({
+                                  lumpSums: data.lumpSums.filter((x) =>
+                                    l.id
+                                      ? x.id !== l.id
+                                      : x.month !== l.month || (x.day || 1) !== (l.day || 1),
+                                  ),
+                                })
+                              }
+                              className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                              title="Remove"
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  className={`lg:col-span-7 p-3.5 rounded-xl border ${
+                    isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-semibold ${subtext}`}>
+                      {newLump.originalId ? "Edit Prepayment" : "Add Lump Sum / Down Payment"}
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-lg font-mono border ${
+                        isDark
+                          ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
+                      }`}
+                    >
+                      📅 {getResolvedDate(Math.max(1, newLump.month), newLump.day)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <NumInput
+                      placeholder="Month (0=down)"
+                      value={newLump.month}
+                      onChange={(v) => setNewLump({ ...newLump, month: v })}
+                      onEnter={addLS}
+                      isDark={isDark}
+                      min={0}
+                      max={data.years * 12}
+                    />
+                    <NumInput
+                      placeholder="Day (1-31)"
+                      value={newLump.day}
+                      onChange={(v) =>
+                        setNewLump({ ...newLump, day: Math.min(31, Math.max(1, v)) })
+                      }
+                      onEnter={addLS}
+                      isDark={isDark}
+                      min={1}
+                      max={31}
+                    />
+                    <StrInput
+                      placeholder="Prepayment Amount"
+                      value={newLump.amount}
+                      onChange={(v) => setNewLump({ ...newLump, amount: v })}
+                      onEnter={addLS}
+                      isDark={isDark}
+                    />
+                    <ActionBtn onClick={addLS} color="amber" isDark={isDark}>
+                      {newLump.originalId ? "Save" : "Add Prepayment"}
+                    </ActionBtn>
+                    {newLump.originalId && (
+                      <CancelBtn
+                        onClick={() => setNewLump({ month: 0, day: 1, amount: "" })}
+                        isDark={isDark}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 4. OVERDRAFT / OFFSET TAB */}
+            {activeTab === "overdraft" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <div className="lg:col-span-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                      Offset Account Balances
+                    </span>
+                    <span className="text-xs font-mono font-bold text-emerald-400">
+                      Baseline: {fmt(data.baselineOd || 0)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {data.baselineOd ? (
+                      <span
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                          isDark
+                            ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        }`}
+                      >
+                        <span>Fixed Baseline: {fmt(data.baselineOd)}</span>
+                        <button
+                          type="button"
+                          onClick={() => updateData({ baselineOd: 0 })}
+                          className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                          title="Clear baseline"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ) : null}
+                    {(data.customOds || []).map((o) => (
+                      <span
+                        key={o.fromMonth}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                          isDark
+                            ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        }`}
+                      >
+                        <span
+                          className="cursor-pointer hover:underline"
+                          onClick={() => {
+                            setNewOd({
+                              fromMonth: o.fromMonth,
+                              amount: o.amount.toString(),
+                              originalMonth: o.fromMonth,
+                            });
+                          }}
+                          title="Click to edit"
+                        >
+                          From M{o.fromMonth}: {fmt(o.amount)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateData({
+                              customOds: (data.customOds || []).filter(
+                                (x) => x.fromMonth !== o.fromMonth,
+                              ),
+                            })
+                          }
+                          className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                          title="Remove"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                    {!data.baselineOd && (!data.customOds || data.customOds.length === 0) && (
+                      <span className={`text-xs italic ${subtext}`}>
+                        No offset balance configured. Funds in offset reduce daily interest.
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  className={`lg:col-span-7 p-3.5 rounded-xl border space-y-3 ${
+                    isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-sm"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className={`text-xs font-semibold ${subtext}`}>Fixed Baseline Offset:</span>
+                    <div className="flex items-center gap-2">
+                      <NumInput
+                        placeholder="Baseline OD"
+                        value={data.baselineOd || 0}
+                        onChange={(v) => updateData({ baselineOd: v })}
+                        onEnter={() => {}}
+                        isDark={isDark}
+                        min={0}
+                      />
+                    </div>
+                  </div>
+                  <div className={`border-t ${divider}`} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-xs font-semibold ${subtext}`}>Stepped Offset Tier:</span>
+                    <NumInput
+                      placeholder="From Month"
+                      value={newOd.fromMonth}
+                      onChange={(v) => setNewOd({ ...newOd, fromMonth: v })}
+                      onEnter={addOd}
+                      isDark={isDark}
+                      min={1}
+                    />
+                    <StrInput
+                      placeholder="Balance Amount"
+                      value={newOd.amount}
+                      onChange={(v) => setNewOd({ ...newOd, amount: v })}
+                      onEnter={addOd}
+                      isDark={isDark}
+                    />
+                    <ActionBtn onClick={addOd} color="emerald" isDark={isDark}>
+                      {newOd.originalMonth !== undefined ? "Save" : "Add Tier"}
+                    </ActionBtn>
+                    {newOd.originalMonth !== undefined && (
+                      <CancelBtn
+                        onClick={() => setNewOd({ fromMonth: 1, amount: "" })}
+                        isDark={isDark}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 5. MISC EXPENSES TAB */}
+            {activeTab === "misc" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <div className="lg:col-span-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                      Fees, Legal & Insurance ({data.miscExpenses?.length || 0})
+                    </span>
+                    <span className="text-xs font-mono font-bold text-orange-400">
+                      Total: {fmt((data.miscExpenses || []).reduce((s, m) => s + (m.amount || 0), 0))}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {!data.miscExpenses || data.miscExpenses.length === 0 ? (
+                      <span className={`text-xs italic ${subtext}`}>
+                        No fees or one-time expenses recorded.
+                      </span>
+                    ) : (
+                      data.miscExpenses.map((m) => (
+                        <span
+                          key={m.id}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                            isDark
+                              ? "bg-orange-500/10 text-orange-300 border-orange-500/20"
+                              : "bg-orange-50 text-orange-700 border-orange-200"
+                          }`}
+                        >
+                          <span
+                            className="cursor-pointer hover:underline"
+                            onClick={() => {
+                              setNewMisc({
+                                id: m.id,
+                                date: m.date,
+                                amount: m.amount.toString(),
+                                comments: m.comments,
+                                originalId: m.id,
+                              });
+                            }}
+                            title="Click to edit"
+                          >
+                            {m.date}: {fmt(m.amount)}{m.comments ? ` (${m.comments})` : ""}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateData({
+                                miscExpenses: (data.miscExpenses || []).filter(
+                                  (x) => x.id !== m.id,
+                                ),
+                              })
+                            }
+                            className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                            title="Remove"
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  className={`lg:col-span-7 p-3.5 rounded-xl border ${
+                    isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-semibold ${subtext}`}>
+                      {newMisc.originalId ? "Edit Fee / Charge" : "Add Fee or Expense"}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <input
+                      type="date"
+                      value={newMisc.date}
+                      onChange={(e) => setNewMisc({ ...newMisc, date: e.target.value })}
+                      className={`px-3 py-1.5 text-xs font-mono rounded-xl border outline-none transition-all ${
+                        isDark
+                          ? "bg-slate-900 border-slate-700 text-white focus:border-orange-500"
+                          : "bg-white border-slate-300 text-slate-800 focus:border-orange-500 shadow-xs"
+                      }`}
+                    />
+                    <StrInput
+                      placeholder="Amount"
+                      value={newMisc.amount}
+                      onChange={(v) => setNewMisc({ ...newMisc, amount: v })}
+                      onEnter={addMisc}
+                      isDark={isDark}
+                    />
+                    <StrInput
+                      placeholder="Tag / Comments"
+                      value={newMisc.comments}
+                      onChange={(v) => setNewMisc({ ...newMisc, comments: v })}
+                      onEnter={addMisc}
+                      isDark={isDark}
+                    />
+                    <ActionBtn onClick={addMisc} color="orange" isDark={isDark}>
+                      {newMisc.originalId ? "Save" : "Add Fee"}
+                    </ActionBtn>
+                    {newMisc.originalId && (
+                      <CancelBtn
+                        onClick={() =>
+                          setNewMisc({
+                            date: new Date().toISOString().split("T")[0],
+                            amount: "",
+                            comments: "",
+                          })
+                        }
+                        isDark={isDark}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── MODE 2: MULTI-COLUMN SIDE-BY-SIDE GRID ───────────────────────── */}
+      {layoutMode === "grid" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          {/* Card 1: Disbursements */}
+          <div
+            className={`p-4 rounded-2xl border flex flex-col justify-between ${
+              isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5">
+                <div className="flex items-center gap-1.5">
+                  <Wallet size={14} className="text-sky-400" />
+                  <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                    Disbursements
+                  </span>
+                </div>
+                <span className="text-xs font-bold font-mono text-sky-400">
+                  {fmt(data.dispersals.reduce((s, d) => s + (d.amount || 0), 0))}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-3 min-h-[42px]">
+                {data.dispersals.map((d) => (
+                  <span
+                    key={d.id || `${d.month}-${d.day}`}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isDark ? "bg-sky-500/10 text-sky-300 border-sky-500/20" : "bg-sky-50 text-sky-700 border-sky-200"
+                    }`}
+                  >
+                    <span>M{d.month}: {fmt(d.amount)}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateData({
+                          dispersals: data.dispersals.filter((x) =>
+                            d.id ? x.id !== d.id : x.month !== d.month,
+                          ),
+                        })
+                      }
+                      className="hover:opacity-70"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("dispersals");
+                setLayoutMode("workbench");
+              }}
+              className="w-full py-1.5 rounded-xl text-xs font-semibold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 transition-all cursor-pointer"
+            >
+              + Configure Disbursements
+            </button>
+          </div>
+
+          {/* Card 2: Custom EMI */}
+          <div
+            className={`p-4 rounded-2xl border flex flex-col justify-between ${
+              isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5">
+                <div className="flex items-center gap-1.5">
+                  <Percent size={14} className="text-violet-400" />
+                  <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                    Custom EMI
+                  </span>
+                </div>
+                <span className="text-xs font-bold font-mono text-violet-400">
+                  {data.customEmis.length} rules
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-3 min-h-[42px]">
+                {data.customEmis.map((e) => (
+                  <span
+                    key={e.id || `${e.fromMonth}-${e.day}`}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isDark ? "bg-violet-500/10 text-violet-300 border-violet-500/20" : "bg-violet-50 text-violet-700 border-violet-200"
+                    }`}
+                  >
+                    <span>M{e.fromMonth}: {fmt(e.amount)}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateData({
+                          customEmis: data.customEmis.filter((x) =>
+                            e.id ? x.id !== e.id : x.fromMonth !== e.fromMonth,
+                          ),
+                        })
+                      }
+                      className="hover:opacity-70"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("customEmis");
+                setLayoutMode("workbench");
+              }}
+              className="w-full py-1.5 rounded-xl text-xs font-semibold text-violet-400 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20 transition-all cursor-pointer"
+            >
+              + Configure Custom EMI
+            </button>
+          </div>
+
+          {/* Card 3: Lump Sum Prepayments */}
+          <div
+            className={`p-4 rounded-2xl border flex flex-col justify-between ${
+              isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5">
+                <div className="flex items-center gap-1.5">
+                  <PiggyBank size={14} className="text-amber-400" />
+                  <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                    Lump Sums
+                  </span>
+                </div>
+                <span className="text-xs font-bold font-mono text-amber-400">
+                  {fmt(data.lumpSums.reduce((s, l) => s + (l.amount || 0), 0))}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-3 min-h-[42px]">
+                {data.lumpSums.map((l) => (
+                  <span
+                    key={l.id || `${l.month}-${l.day}`}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isDark ? "bg-amber-500/10 text-amber-300 border-amber-500/20" : "bg-amber-50 text-amber-700 border-amber-200"
+                    }`}
+                  >
+                    <span>M{l.month}: {fmt(l.amount)}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateData({
+                          lumpSums: data.lumpSums.filter((x) =>
+                            l.id ? x.id !== l.id : x.month !== l.month,
+                          ),
+                        })
+                      }
+                      className="hover:opacity-70"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("lumpSums");
+                setLayoutMode("workbench");
+              }}
+              className="w-full py-1.5 rounded-xl text-xs font-semibold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 transition-all cursor-pointer"
+            >
+              + Configure Prepayments
+            </button>
+          </div>
+
+          {/* Card 4: Overdraft / Offset */}
+          <div
+            className={`p-4 rounded-2xl border flex flex-col justify-between ${
+              isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5">
+                <div className="flex items-center gap-1.5">
+                  <DollarSign size={14} className="text-emerald-400" />
+                  <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                    Offset Account
+                  </span>
+                </div>
+                <span className="text-xs font-bold font-mono text-emerald-400">
+                  {fmt(data.baselineOd || 0)}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-3 min-h-[42px]">
+                {data.baselineOd ? (
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isDark ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    }`}
+                  >
+                    <span>Baseline: {fmt(data.baselineOd)}</span>
+                  </span>
+                ) : null}
+                {(data.customOds || []).map((o) => (
+                  <span
+                    key={o.fromMonth}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isDark ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20" : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    }`}
+                  >
+                    <span>M{o.fromMonth}: {fmt(o.amount)}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("overdraft");
+                setLayoutMode("workbench");
+              }}
+              className="w-full py-1.5 rounded-xl text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all cursor-pointer"
+            >
+              + Configure Offset
+            </button>
+          </div>
+
+          {/* Card 5: Fees & Charges */}
+          <div
+            className={`p-4 rounded-2xl border flex flex-col justify-between ${
+              isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5">
+                <div className="flex items-center gap-1.5">
+                  <Receipt size={14} className="text-orange-400" />
+                  <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                    Fees & Expenses
+                  </span>
+                </div>
+                <span className="text-xs font-bold font-mono text-orange-400">
+                  {fmt((data.miscExpenses || []).reduce((s, m) => s + (m.amount || 0), 0))}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-3 min-h-[42px]">
+                {(data.miscExpenses || []).map((m) => (
+                  <span
+                    key={m.id}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isDark ? "bg-orange-500/10 text-orange-300 border-orange-500/20" : "bg-orange-50 text-orange-700 border-orange-200"
+                    }`}
+                  >
+                    <span>{m.comments || m.date}: {fmt(m.amount)}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("misc");
+                setLayoutMode("workbench");
+              }}
+              className="w-full py-1.5 rounded-xl text-xs font-semibold text-orange-400 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 transition-all cursor-pointer"
+            >
+              + Configure Fees
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -5,24 +5,27 @@ import {
   Moon,
   Share2,
   Download,
-  Plus,
   X,
-  Edit2,
   Check,
   ChevronRight,
   ChevronDown,
+  Wallet,
+  Percent,
+  DollarSign,
+  PiggyBank,
+  Receipt,
+  CheckCircle2,
+  Clock,
+  Sparkles,
+  Calendar,
 } from "lucide-react";
 
 // Types
-import {
+import type {
   Loan,
   LoanData,
   ScheduleRow,
   Toast,
-  MiscExpense,
-  Dispersal,
-  CustomEmi,
-  LumpSum,
 } from "./types";
 
 // Constants
@@ -46,12 +49,27 @@ import {
 import { generateCSV, generateDailyCSV, downloadFile } from "./utils/export";
 import { decodeData, getShareUrl } from "./utils/share";
 
-// Components
-import { AdvSection } from "./components/ui/AdvSection";
-import { NumInput } from "./components/ui/NumInput";
-import { StrInput } from "./components/ui/StrInput";
-import { ActionBtn } from "./components/ui/ActionBtn";
-import { CancelBtn } from "./components/ui/CancelBtn";
+// UI Components
+import { SliderInput } from "./components/ui/SliderInput";
+import { MetricCard } from "./components/ui/MetricCard";
+import { AdvancedStrategies } from "./components/strategies/AdvancedStrategies";
+
+// Chart Components
+import { LoanBreakdownDonut } from "./components/charts/LoanBreakdownDonut";
+import { AmortizationAreaChart } from "./components/charts/AmortizationAreaChart";
+
+// Schedule Components
+import { YearlyScheduleTable } from "./components/schedule/YearlyScheduleTable";
+import {
+  ScheduleFilters,
+  type ViewMode,
+  type FilterMode,
+} from "./components/schedule/ScheduleFilters";
+
+// Chrome Tabs & Connected Container Components
+import { ChromeLoanTabs } from "./components/tabs/ChromeLoanTabs";
+import { LoanToolbar } from "./components/tabs/LoanToolbar";
+import { LoanComparisonModal } from "./components/tabs/LoanComparisonModal";
 
 export default function LoanCalculator() {
   const [currency] = useState(getUserCurrency());
@@ -63,9 +81,8 @@ export default function LoanCalculator() {
   const [saveStatus, setSaveStatus] = useState<"saving" | "saved">("saved");
   const [toast, setToast] = useState<Toast | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [editingTabId, setEditingTabId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -74,49 +91,11 @@ export default function LoanCalculator() {
     serverActiveId: string;
   } | null>(null);
 
-  const [newDisp, setNewDisp] = useState<{
-    id?: string;
-    month: number;
-    day: number;
-    amount: number;
-    originalId?: string;
-  }>({ month: 1, day: 1, amount: 0 });
-  const [showDisp, setShowDisp] = useState(false);
-  const [newEmi, setNewEmi] = useState<{
-    id?: string;
-    fromMonth: number;
-    day: number;
-    amount: string;
-    originalId?: string;
-  }>({ fromMonth: 1, day: 1, amount: "" });
-  const [showEmi, setShowEmi] = useState(false);
-  const [newLump, setNewLump] = useState<{
-    id?: string;
-    month: number;
-    day: number;
-    amount: string;
-    originalId?: string;
-  }>({ month: 0, day: 1, amount: "" });
-  const [showLump, setShowLump] = useState(false);
+  // View & Filter states for Schedule
+  const [scheduleViewMode, setScheduleViewMode] = useState<ViewMode>("monthly");
+  const [scheduleFilterMode, setScheduleFilterMode] = useState<FilterMode>("all");
+
   const [expandedMonths, setExpandedMonths] = useState<Record<number, boolean>>({});
-  const [newOd, setNewOd] = useState<{
-    fromMonth: number;
-    amount: string;
-    originalMonth?: number;
-  }>({ fromMonth: 1, amount: "" });
-  const [showOd, setShowOd] = useState(false);
-  const [newMisc, setNewMisc] = useState<{
-    id?: string;
-    date: string;
-    amount: string;
-    comments: string;
-    originalId?: string;
-  }>({
-    date: new Date().toISOString().split("T")[0],
-    amount: "",
-    comments: "",
-  });
-  const [showMisc, setShowMisc] = useState(false);
 
   const activeLoan = loans.find((l) => l.id === activeTabId);
   const data = activeLoan?.data || DEFAULT_DATA;
@@ -146,7 +125,7 @@ export default function LoanCalculator() {
   const addLoan = () => {
     const n: Loan = {
       id: Date.now().toString(),
-      name: `Loan ${loans.length + 1}`,
+      name: `Scenario ${loans.length + 1}`,
       data: { ...DEFAULT_DATA },
     };
     setLoans([...loans, n]);
@@ -155,10 +134,10 @@ export default function LoanCalculator() {
 
   const deleteLoan = (id: string) => {
     if (loans.length <= 1) {
-      showToast("Cannot delete last loan", "error");
+      showToast("Cannot delete last loan scenario", "error");
       return;
     }
-    if (!window.confirm("Are you sure you want to close this loan tab?")) {
+    if (!window.confirm("Are you sure you want to delete this loan scenario?")) {
       return;
     }
     const i = loans.findIndex((l) => l.id === id);
@@ -167,14 +146,25 @@ export default function LoanCalculator() {
     if (activeTabId === id) setActiveTabId(n[Math.max(0, i - 1)].id);
   };
 
-  const renameLoan = () => {
-    if (editingTabId && editingName.trim())
-      setLoans((p) =>
-        p.map((l) =>
-          l.id === editingTabId ? { ...l, name: editingName.trim() } : l,
-        ),
-      );
-    setEditingTabId(null);
+  const duplicateLoan = (id: string) => {
+    const src = loans.find((l) => l.id === id);
+    if (!src) return;
+    const n: Loan = {
+      id: Date.now().toString(),
+      name: `${src.name} (Copy)`,
+      data: JSON.parse(JSON.stringify(src.data)),
+    };
+    setLoans((prev) => [...prev, n]);
+    setActiveTabId(n.id);
+    showToast(`Duplicated scenario "${src.name}"`, "success");
+  };
+
+  const resetLoan = () => {
+    if (!activeLoan) return;
+    if (window.confirm(`Reset "${activeLoan.name}" to default parameters?`)) {
+      updateData(DEFAULT_DATA);
+      showToast(`Reset "${activeLoan.name}" to defaults`, "reset");
+    }
   };
 
   const copy = async () => {
@@ -183,10 +173,10 @@ export default function LoanCalculator() {
         getShareUrl({ loans, activeId: activeTabId }),
       );
       setCopied(true);
-      showToast("Copied!", "success");
+      showToast("Link copied to clipboard!", "success");
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      showToast("Failed", "error");
+      showToast("Failed to copy", "error");
     }
   };
 
@@ -195,9 +185,9 @@ export default function LoanCalculator() {
     if (navigator.share) {
       try {
         await navigator.share({ title: "Loan Calculator", url });
-        showToast("Shared!", "success");
-      } catch (e: any) {
-        if (e.name !== "AbortError") setShowShareModal(true);
+        showToast("Shared successfully!", "success");
+      } catch (e: unknown) {
+        if ((e as Error)?.name !== "AbortError") setShowShareModal(true);
       }
     } else setShowShareModal(true);
   };
@@ -227,18 +217,40 @@ export default function LoanCalculator() {
     );
   };
 
+  interface FirebaseBridge {
+    apps: unknown[];
+    initializeApp: (cfg: unknown) => unknown;
+    auth: {
+      (): {
+        signInWithPopup: (provider: unknown) => Promise<unknown>;
+        signOut: () => Promise<void>;
+        currentUser: { uid: string; email?: string | null } | null;
+        onAuthStateChanged: (cb: (u: { email?: string | null } | null) => void) => () => void;
+      };
+      GoogleAuthProvider: new () => unknown;
+    };
+    firestore: () => {
+      collection: (name: string) => {
+        doc: (id: string) => {
+          get: () => Promise<{ exists: boolean; data: () => { loans: Loan[]; activeId: string } | undefined }>;
+          set: (data: unknown, opts: { merge: boolean }) => Promise<void>;
+        };
+      };
+    };
+  }
+
   const getFirebaseConfig = () => {
-    const envCfg = (window as any).__FIREBASE_CONFIG__;
+    const envCfg = (window as unknown as { __FIREBASE_CONFIG__?: unknown }).__FIREBASE_CONFIG__;
     if (envCfg) return envCfg;
     const stored = localStorage.getItem(FIREBASE_CONFIG_KEY);
     return stored ? JSON.parse(stored) : null;
   };
 
-  const ensureFirebase = async () => {
+  const ensureFirebase = async (): Promise<FirebaseBridge> => {
     await loadFirebaseSdk();
     const cfg = getFirebaseConfig();
     if (!cfg) throw new Error("Missing Firebase config");
-    const fb = (window as any).firebase;
+    const fb = (window as unknown as { firebase: FirebaseBridge }).firebase;
     if (!fb.apps.length) fb.initializeApp(cfg);
     return fb;
   };
@@ -248,10 +260,10 @@ export default function LoanCalculator() {
       const fb = await ensureFirebase();
       const provider = new fb.auth.GoogleAuthProvider();
       await fb.auth().signInWithPopup(provider);
-      showToast("Signed in", "success");
-    } catch (error: any) {
+      showToast("Signed in with Google", "success");
+    } catch (error: unknown) {
       console.error("Firebase Login Error:", error);
-      showToast(`Login failed: ${error.message || "Unknown error"}`, "error");
+      showToast(`Login failed: ${(error as Error)?.message || "Unknown error"}`, "error");
     }
   };
 
@@ -277,11 +289,11 @@ export default function LoanCalculator() {
         .collection("loanCalculatorUsers")
         .doc(user.uid)
         .get();
-      if (doc.exists && doc.data()?.loans?.length > 0) {
-        const d = doc.data();
+      const d = doc.data();
+      if (doc.exists && d && d.loans && d.loans.length > 0) {
         setSyncModalData({
           serverLoans: migrateLoans(d.loans),
-          serverActiveId: d.activeId,
+          serverActiveId: d.activeId || "",
         });
       } else {
         await performSyncPush();
@@ -317,7 +329,7 @@ export default function LoanCalculator() {
           },
           { merge: true },
         );
-      showToast("Synced to Firestore", "success");
+      showToast("Synced to Cloud Firestore", "success");
     } catch {
       showToast("Sync failed", "error");
     } finally {
@@ -342,7 +354,7 @@ export default function LoanCalculator() {
       const mergedLoans = syncModalData.serverLoans.map((sl) => ({
         ...sl,
         id: Date.now().toString() + Math.random().toString(36).substring(2, 7),
-        name: `${sl.name} (Server)`,
+        name: `${sl.name} (Cloud)`,
       }));
       const combined = [...loans, ...mergedLoans];
       setLoans(combined);
@@ -355,9 +367,9 @@ export default function LoanCalculator() {
       const csv = generateCSV(schedule, totals, cm, data.miscExpenses || []);
       const filename = `loan-${activeLoan?.name.replace(/\s/g, "-")}-${new Date().toISOString().split("T")[0]}.csv`;
       downloadFile(csv, filename);
-      showToast("Downloaded!", "success");
+      showToast("Downloaded Amortization CSV!", "success");
     } catch {
-      showToast("Failed", "error");
+      showToast("Export failed", "error");
     }
   };
 
@@ -369,7 +381,7 @@ export default function LoanCalculator() {
         if (d?.loans?.length) {
           setLoans(migrateLoans(d.loans));
           setActiveTabId(d.activeId || d.loans[0].id);
-          showToast("Loaded", "success");
+          showToast("Loaded loan scenario", "success");
         }
       } else {
         const s = localStorage.getItem(STORAGE_KEY);
@@ -379,11 +391,11 @@ export default function LoanCalculator() {
             setLoans(migrateLoans(p.loans));
             setActiveTabId(p.activeId || p.loans[0].id);
           } else {
-            setLoans([{ id: "1", name: "My Loan", data: DEFAULT_DATA }]);
+            setLoans([{ id: "1", name: "Primary Mortgage", data: DEFAULT_DATA }]);
             setActiveTabId("1");
           }
         } else {
-          setLoans([{ id: "1", name: "My Loan", data: DEFAULT_DATA }]);
+          setLoans([{ id: "1", name: "Primary Mortgage", data: DEFAULT_DATA }]);
           setActiveTabId("1");
         }
       }
@@ -392,7 +404,7 @@ export default function LoanCalculator() {
       setIsDark(dark);
       document.documentElement.classList[dark ? "add" : "remove"]("dark");
     } catch {
-      setLoans([{ id: "1", name: "My Loan", data: DEFAULT_DATA }]);
+      setLoans([{ id: "1", name: "Primary Mortgage", data: DEFAULT_DATA }]);
       setActiveTabId("1");
     }
     setLoaded(true);
@@ -430,7 +442,7 @@ export default function LoanCalculator() {
     const init = async () => {
       try {
         const fb = await ensureFirebase();
-        unsub = fb.auth().onAuthStateChanged((u: any) => {
+        unsub = fb.auth().onAuthStateChanged((u) => {
           setUserEmail(u?.email || null);
           setAuthReady(true);
         });
@@ -442,6 +454,7 @@ export default function LoanCalculator() {
     return () => {
       if (unsub) unsub();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const schedule = useMemo<ScheduleRow[]>(() => {
@@ -461,6 +474,17 @@ export default function LoanCalculator() {
     cm >= schedule.length
       ? 0
       : schedule.slice(cm).reduce((s, r) => s + r.emi, 0);
+
+  // Payoff acceleration calculations
+  const scheduledMonths = Math.max(1, (data.years || 1) * 12);
+  const actualPayoffRow = schedule.find((r) => r.remaining <= 0);
+  const actualPayoffMonth = actualPayoffRow ? actualPayoffRow.m : schedule.length;
+  const monthsSaved = Math.max(0, scheduledMonths - actualPayoffMonth);
+  const yearsSaved = (monthsSaved / 12).toFixed(1);
+
+  // Standard benchmark EMI estimate
+  const standardEmiEstimate = schedule[0]?.stdEmi || 0;
+  const activeEmiEstimate = schedule.find((r) => r.emi > 0)?.emi || standardEmiEstimate;
 
   const toggleMonth = (m: number) => {
     setExpandedMonths((prev) => ({ ...prev, [m]: !prev[m] }));
@@ -489,192 +513,189 @@ export default function LoanCalculator() {
   const exportDailyData = () => {
     const csv = generateDailyCSV(schedule);
     downloadFile(csv, `${activeLoan?.name || "loan"}-daily-schedule.csv`);
-    showToast("Exported Daily CSV", "success");
+    showToast("Exported Granular Daily CSV", "success");
   };
 
-  const addDisp = () => {
-    if (
-      newDisp.month < 1 ||
-      newDisp.month > data.years * 12 ||
-      newDisp.amount <= 0
-    )
-      return;
-    const day = Math.min(31, Math.max(1, newDisp.day || 1));
-    const currentDispersals = data.dispersals || [];
-    let updated: Dispersal[];
-    if (newDisp.originalId) {
-      updated = currentDispersals.map((d) =>
-        (d.id && d.id === newDisp.originalId) || (!d.id && `${d.month}-${d.day || 1}` === newDisp.originalId)
-          ? {
-              id: d.id || newDisp.originalId,
-              month: newDisp.month,
-              day,
-              amount: newDisp.amount,
-            }
-          : d,
+  // Filtered rows for Monthly view
+  const filteredSchedule = useMemo(() => {
+    if (scheduleFilterMode === "all") return schedule;
+    if (scheduleFilterMode === "prepayments") {
+      return schedule.filter(
+        (r) =>
+          (r.lumpAmt || 0) > 0 ||
+          r.payType === "custom" ||
+          r.disbAmt > 0 ||
+          r.interestSaved > 0,
       );
-    } else {
-      const newItem: Dispersal = {
-        id: `disp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        month: newDisp.month,
-        day,
-        amount: newDisp.amount,
-      };
-      updated = [...currentDispersals, newItem];
     }
-    updateData({
-      dispersals: updated.sort(
-        (a, b) => a.month - b.month || (a.day || 1) - (b.day || 1),
-      ),
-    });
-    setNewDisp({ month: 1, day: 1, amount: 0 });
-    setShowDisp(false);
-  };
-
-  const addCEmi = () => {
-    const a = parseFloat(newEmi.amount);
-    if (!a || a <= 0 || newEmi.fromMonth < 1) return;
-    const day = Math.min(31, Math.max(1, newEmi.day || 1));
-    const currentCustomEmis = data.customEmis || [];
-    let updated: CustomEmi[];
-    if (newEmi.originalId) {
-      updated = currentCustomEmis.map((e) =>
-        (e.id && e.id === newEmi.originalId) || (!e.id && `${e.fromMonth}-${e.day || 1}` === newEmi.originalId)
-          ? {
-              id: e.id || newEmi.originalId,
-              fromMonth: newEmi.fromMonth,
-              day,
-              amount: a,
-            }
-          : e,
-      );
-    } else {
-      const newItem: CustomEmi = {
-        id: `emi-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        fromMonth: newEmi.fromMonth,
-        day,
-        amount: a,
-      };
-      updated = [...currentCustomEmis, newItem];
+    if (scheduleFilterMode === "pending") {
+      return schedule.filter((r) => r.m >= cm && r.remaining > 0);
     }
-    updateData({
-      customEmis: updated.sort(
-        (a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1),
-      ),
-    });
-    setNewEmi({ fromMonth: 1, day: 1, amount: "" });
-    setShowEmi(false);
-  };
+    return schedule;
+  }, [schedule, scheduleFilterMode, cm]);
 
-  const addLS = () => {
-    const a = parseFloat(newLump.amount);
-    const m = newLump.month;
-    if (!a || a <= 0 || m < 0) return;
-    const day = Math.min(31, Math.max(1, newLump.day || 1));
-    const currentLumpSums = data.lumpSums || [];
-    let updated: LumpSum[];
-    if (newLump.originalId) {
-      updated = currentLumpSums.map((l) =>
-        (l.id && l.id === newLump.originalId) || (!l.id && `${l.month}-${l.day || 1}` === newLump.originalId)
-          ? {
-              id: l.id || newLump.originalId,
-              month: m,
-              day,
-              amount: a,
-            }
-          : l,
-      );
-    } else {
-      const newItem: LumpSum = {
-        id: `lump-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        month: m,
-        day,
-        amount: a,
-      };
-      updated = [...currentLumpSums, newItem];
-    }
-    updateData({
-      lumpSums: updated.sort(
-        (a, b) => a.month - b.month || (a.day || 1) - (b.day || 1),
-      ),
-    });
-    setNewLump({ month: 0, day: 1, amount: "" });
-    setShowLump(false);
-  };
-
-  const addOd = () => {
-    const a = parseFloat(newOd.amount);
-    if (isNaN(a) || a < 0) return;
-    const item = { fromMonth: newOd.fromMonth, amount: a };
-    const currentCustomOds = data.customOds || [];
-    updateData({
-      customOds: [
-        ...currentCustomOds.filter(
-          (o) => o.fromMonth !== (newOd.originalMonth ?? newOd.fromMonth),
-        ),
-        item,
-      ].sort((a, b) => a.fromMonth - b.fromMonth),
-    });
-    setNewOd({ fromMonth: 1, amount: "" });
-    setShowOd(false);
-  };
-
-  const addMisc = () => {
-    const amt = parseFloat(newMisc.amount);
-    if (isNaN(amt) || amt <= 0 || !newMisc.date) return;
-    const currentMisc = data.miscExpenses || [];
-    let updated: MiscExpense[];
-    if (newMisc.originalId) {
-      updated = currentMisc.map((m) =>
-        m.id === newMisc.originalId
-          ? {
-              id: m.id,
-              date: newMisc.date,
-              amount: amt,
-              comments: newMisc.comments || "",
-            }
-          : m,
-      );
-    } else {
-      const newItem: MiscExpense = {
-        id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
-        date: newMisc.date,
-        amount: amt,
-        comments: newMisc.comments || "",
-      };
-      updated = [...currentMisc, newItem];
-    }
-    updateData({ miscExpenses: updated });
-    setShowMisc(false);
-    setNewMisc({
-      date: new Date().toISOString().split("T")[0],
-      amount: "",
-      comments: "",
-    });
-  };
-
-  /* ── Theme-aware class helpers ────────────────────────────────────────── */
+  /* ── Dribbble Glass & Surface Styling Tokens ───────────────────────────── */
   const card = isDark
-    ? "bg-white/[0.04] border border-white/[0.1] rounded-sm backdrop-blur-sm shadow-none"
-    : "bg-white border border-gray-200 rounded-sm shadow-none";
+    ? "bg-slate-950/60 border border-slate-800/80 rounded-2xl backdrop-blur-md shadow-lg shadow-black/20"
+    : "bg-slate-50/70 border border-slate-200/90 rounded-2xl shadow-sm";
 
   const surfaceInput = isDark
-    ? "bg-white/[0.06] border border-white/10 text-gray-100 placeholder-gray-500 focus:border-sky-400/70 focus:ring-1 focus:ring-sky-400/20 rounded-sm"
-    : "bg-gray-50 border border-gray-200 text-gray-800 placeholder-gray-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500/20 rounded-sm";
+    ? "bg-slate-900/60 border border-slate-700/80 text-white placeholder-slate-500 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 rounded-xl"
+    : "bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 rounded-xl";
 
-  const label = isDark ? "text-gray-400" : "text-gray-500";
-  const heading = isDark ? "text-gray-100" : "text-gray-900";
-  const subtext = isDark ? "text-gray-400" : "text-gray-500";
-  const divider = isDark ? "border-white/[0.06]" : "border-gray-100";
+  const heading = isDark ? "text-white" : "text-slate-900";
+  const subtext = isDark ? "text-slate-400" : "text-slate-500";
+  const divider = isDark ? "border-slate-800/80" : "border-slate-200";
   const root = isDark
-    ? "min-h-screen bg-[#0d0f14] text-gray-100"
-    : "min-h-screen bg-gray-50 text-gray-900";
+    ? "min-h-screen bg-[#0B0F19] text-slate-100"
+    : "min-h-screen bg-[#F8FAFC] text-slate-900";
+
+  // Daily breakdown sub-table renderer for expandable month rows (fully displayed without nested scroll)
+  const renderDailyBreakdown = (r: ScheduleRow) => {
+    if (!r.days || r.days.length === 0) return null;
+    return (
+      <div className={`p-3 border-y ${divider} ${isDark ? "bg-[#070A10]" : "bg-slate-50/80"}`}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold tracking-wider uppercase text-sky-400">
+              Month {r.m} ({r.date}) — Granular Day-Wise Calculation
+            </span>
+            <span className={`text-[10px] ${subtext}`}>
+              ({r.days.length} days · {r.days.filter((d) => (d.events?.length || 0) > 0).length} active events)
+            </span>
+          </div>
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-white/5">
+          <table className="w-full text-[11px]">
+            <thead className={isDark ? "bg-slate-900" : "bg-slate-100"}>
+              <tr className={`border-b ${divider}`}>
+                <th className={`px-2 py-1.5 text-left font-semibold text-[10px] ${subtext}`}>Day / Date</th>
+                <th className={`px-2 py-1.5 text-left font-semibold text-[10px] ${subtext}`}>Events</th>
+                <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Disbursement</th>
+                <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Payment / EMI</th>
+                <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Lump Sum</th>
+                <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Prin Repaid</th>
+                <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Daily Interest</th>
+                <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Saved</th>
+                {hasOd && <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>OD Bal</th>}
+                <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Net Balance</th>
+                <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Closing Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.days.map((d) => {
+                const hasEvent = d.events && d.events.length > 0;
+                return (
+                  <tr
+                    key={d.day}
+                    className={`border-b transition-colors ${divider} ${
+                      hasEvent
+                        ? isDark
+                          ? "bg-sky-500/10"
+                          : "bg-sky-50/70"
+                        : isDark
+                        ? "hover:bg-slate-800/20"
+                        : "hover:bg-slate-100/50"
+                    }`}
+                  >
+                    <td className="px-2 py-1 whitespace-nowrap font-mono text-[10px]">
+                      <span className="font-bold text-sky-400">D{d.day}</span>{" "}
+                      <span className={subtext}>({d.date.split(",")[0]})</span>
+                    </td>
+                    <td className="px-2 py-1">
+                      {d.events && d.events.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {d.events.map((ev, i) => (
+                            <span
+                              key={i}
+                              className="px-1.5 py-0.2 rounded-md text-[9px] font-semibold bg-sky-500/10 text-sky-300 border border-sky-500/20"
+                            >
+                              {ev}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className={subtext}>—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono text-sky-400">
+                      {d.disbAmt > 0 ? fmt(d.disbAmt) : <span className={subtext}>—</span>}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono">
+                      {d.emiAmt > 0 ? fmt(d.emiAmt) : <span className={subtext}>—</span>}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono text-amber-400">
+                      {d.lumpAmt > 0 ? fmt(d.lumpAmt) : <span className={subtext}>—</span>}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono text-teal-400">
+                      {d.prinPay > 0 ? fmt(d.prinPay) : <span className={subtext}>—</span>}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono text-amber-400">
+                      {d.intPay > 0 ? fmt(d.intPay) : <span className={subtext}>—</span>}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono text-emerald-400">
+                      {d.interestSaved > 0 ? fmt(d.interestSaved) : <span className={subtext}>—</span>}
+                    </td>
+                    {hasOd && (
+                      <td className="px-2 py-1 text-right font-mono text-emerald-400">
+                        {d.odBal > 0 ? fmt(d.odBal) : <span className={subtext}>—</span>}
+                      </td>
+                    )}
+                    <td className="px-2 py-1 text-right font-mono">
+                      {fmt(d.netPrincipal)}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono font-bold">
+                      {fmt(d.balance)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className={`font-semibold ${isDark ? "bg-slate-900/90" : "bg-slate-100"}`}>
+              <tr className={`border-t ${divider}`}>
+                <td className="px-2 py-1.5" colSpan={2}>
+                  Month {r.m} Totals
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono text-sky-400">
+                  {r.disbAmt > 0 ? fmt(r.disbAmt) : "—"}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono">
+                  {r.emi > 0 ? fmt(r.emi) : "—"}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono text-amber-400">
+                  {r.lumpAmt ? fmt(r.lumpAmt) : "—"}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono text-teal-400">
+                  {fmt(r.prinPay)}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono text-amber-400">
+                  {fmt(r.intPay)}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono text-emerald-400">
+                  {r.interestSaved > 0 ? fmt(r.interestSaved) : "—"}
+                </td>
+                {hasOd && (
+                  <td className="px-2 py-1.5 text-right font-mono text-emerald-400">
+                    {r.odBal > 0 ? fmt(r.odBal) : "—"}
+                  </td>
+                )}
+                <td className="px-2 py-1.5 text-right font-mono">—</td>
+                <td className="px-2 py-1.5 text-right font-mono font-bold">
+                  {fmt(r.remaining)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    );
+  };
 
   if (!loaded)
     return (
       <div className={`${root} flex items-center justify-center`}>
         <div className="flex items-center gap-3 text-sky-400">
-          <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
+          <svg className="animate-spin w-6 h-6" viewBox="0 0 24 24" fill="none">
             <circle
               className="opacity-20"
               cx="12"
@@ -689,70 +710,94 @@ export default function LoanCalculator() {
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
             />
           </svg>
-          <span className="text-sm font-medium tracking-wide">Loading…</span>
+          <span className="text-sm font-semibold tracking-wide">
+            Initializing Loan Engine…
+          </span>
         </div>
       </div>
     );
 
   return (
     <div className={root}>
-      {/* ── Toast ─────────────────────────────────────────────────────────── */}
+      {/* ── Toast Notification ────────────────────────────────────────────── */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-3 py-2 rounded-sm text-xs font-semibold shadow-lg animate-[slideIn_0.25s_ease-out] flex items-center gap-2 ${
+          className={`fixed top-4 right-4 z-50 px-4 py-2.5 rounded-xl text-xs font-bold shadow-2xl animate-[slideIn_0.25s_ease-out] flex items-center gap-2 ${
             toast.type === "success"
-              ? "bg-emerald-500 text-white"
+              ? "bg-emerald-500 text-white shadow-emerald-500/25"
               : toast.type === "error"
-                ? "bg-rose-500 text-white"
-                : "bg-sky-500 text-white"
+              ? "bg-rose-500 text-white shadow-rose-500/25"
+              : "bg-sky-500 text-white shadow-sky-500/25"
           }`}
         >
-          {toast.msg}
+          <Sparkles size={14} />
+          <span>{toast.msg}</span>
         </div>
       )}
 
       {/* ── Share Modal ───────────────────────────────────────────────────── */}
       {showShareModal && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3"
+          className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fadeIn"
           onClick={() => setShowShareModal(false)}
         >
           <div
-            className={`${card} max-w-md w-full p-4`}
+            className={`${card} max-w-md w-full p-6 animate-scaleUp`}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className={`text-sm font-semibold ${heading}`}>
-                Share Calculator
-              </h3>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400">
+                  <Share2 size={18} />
+                </div>
+                <h3 className={`text-base font-bold ${heading}`}>
+                  Share Calculator
+                </h3>
+              </div>
               <button
+                type="button"
                 onClick={() => setShowShareModal(false)}
-                className={`p-1 rounded-sm hover:bg-white/10 ${subtext}`}
+                className={`p-1.5 rounded-xl hover:bg-white/10 ${subtext}`}
               >
-                <X size={14} />
+                <X size={16} />
               </button>
             </div>
+            <p className={`text-xs mb-3 ${subtext}`}>
+              Share this exact calculation scenario with teammates or clients via an encrypted URL link:
+            </p>
             <div
-              className={`rounded-sm p-2 mb-3 break-all text-xs font-mono ${isDark ? "bg-white/[0.06] text-gray-400" : "bg-gray-100 text-gray-600"}`}
+              className={`rounded-xl p-3 mb-4 break-all text-xs font-mono select-all border ${
+                isDark
+                  ? "bg-slate-950 border-slate-800 text-slate-300"
+                  : "bg-slate-100 border-slate-200 text-slate-700"
+              }`}
             >
               {getShareUrl({ loans, activeId: activeTabId })}
             </div>
             <div className="flex gap-2">
               <button
+                type="button"
                 onClick={copy}
-                className="flex-1 px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-white rounded-sm text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                className="flex-1 px-4 py-2.5 bg-sky-500 hover:bg-sky-400 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-sky-500/25 transition-all"
               >
                 {copied ? (
                   <>
-                    <Check size={13} /> Copied
+                    <Check size={14} /> Copied to Clipboard
                   </>
                 ) : (
-                  "Copy link"
+                  <>
+                    <Share2 size={14} /> Copy Link
+                  </>
                 )}
               </button>
               <button
+                type="button"
                 onClick={() => setShowShareModal(false)}
-                className={`px-3 py-1.5 rounded-sm text-xs font-semibold transition-colors ${isDark ? "bg-white/[0.06] hover:bg-white/10 text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
+                className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                  isDark
+                    ? "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
+                    : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+                }`}
               >
                 Close
               </button>
@@ -764,49 +809,58 @@ export default function LoanCalculator() {
       {/* ── Sync Modal ────────────────────────────────────────────────────── */}
       {syncModalData && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fadeIn"
           onClick={() => setSyncModalData(null)}
         >
           <div
-            className={`${card} max-w-md w-full p-6`}
+            className={`${card} max-w-md w-full p-6 animate-scaleUp`}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className={`text-base font-semibold ${heading}`}>
-                Sync Conflict
+              <h3 className={`text-base font-bold ${heading}`}>
+                Cloud Sync Conflict
               </h3>
               <button
+                type="button"
                 onClick={() => setSyncModalData(null)}
-                className={`p-1.5 rounded-lg hover:bg-white/10 ${subtext}`}
+                className={`p-1.5 rounded-xl hover:bg-white/10 ${subtext}`}
               >
                 <X size={16} />
               </button>
             </div>
-            <p className={`text-sm mb-6 ${subtext}`}>
-              Server data exists. How would you like to resolve the sync?
+            <p className={`text-xs mb-5 ${subtext}`}>
+              Existing scenario data was found on Firestore Cloud. How would you like to reconcile?
             </p>
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2.5">
               <button
+                type="button"
                 onClick={() => handleSyncChoice("local")}
-                className="w-full px-4 py-3 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-sm font-semibold transition-colors"
+                className="w-full px-4 py-2.5 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-sky-500/20"
               >
-                Use Local Data (Overwrite Server)
+                Use Local Data (Overwrite Cloud)
               </button>
               <button
+                type="button"
                 onClick={() => handleSyncChoice("server")}
-                className="w-full px-4 py-3 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl text-sm font-semibold transition-colors"
+                className="w-full px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/20"
               >
-                Use Server Data (Overwrite Local)
+                Use Cloud Data (Overwrite Local)
               </button>
               <button
+                type="button"
                 onClick={() => handleSyncChoice("both")}
-                className="w-full px-4 py-3 bg-violet-500 hover:bg-violet-400 text-white rounded-xl text-sm font-semibold transition-colors"
+                className="w-full px-4 py-2.5 bg-violet-500 hover:bg-violet-400 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-violet-500/20"
               >
-                Keep Both (Merge as new tabs)
+                Merge Both (Create New Scenario Tabs)
               </button>
               <button
+                type="button"
                 onClick={() => setSyncModalData(null)}
-                className={`w-full px-4 py-3 mt-2 rounded-xl text-sm font-semibold transition-colors ${isDark ? "bg-white/[0.06] hover:bg-white/10 text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
+                className={`w-full px-4 py-2.5 mt-1 rounded-xl text-xs font-semibold border transition-all ${
+                  isDark
+                    ? "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
+                    : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+                }`}
               >
                 Cancel
               </button>
@@ -815,1096 +869,710 @@ export default function LoanCalculator() {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-5">
-        {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-sm bg-sky-500/20 flex items-center justify-center border border-sky-500/30">
-              <Calculator size={16} className="text-sky-400" />
+      {/* ── Scenario Comparison Matrix Modal ──────────────────────────────── */}
+      <LoanComparisonModal
+        isOpen={showComparisonModal}
+        onClose={() => setShowComparisonModal(false)}
+        loans={loans}
+        activeTabId={activeTabId}
+        onSelectLoan={setActiveTabId}
+        onDuplicateLoan={duplicateLoan}
+        onDeleteLoan={deleteLoan}
+        isDark={isDark}
+        currency={currency}
+        locale={locale}
+      />
+
+      {/* ── Main Container ────────────────────────────────────────────────── */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-6">
+        {/* ── Header & Navigation Bar ─────────────────────────────────────── */}
+        <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-2 border-b border-white/5">
+          {/* Logo & Brand */}
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/25">
+              <Calculator size={20} className="text-white" />
             </div>
             <div>
-              <h1 className={`text-base font-bold tracking-tight ${heading}`}>
-                Loan Calculator
-              </h1>
-              <p className={`text-[11px] ${subtext}`}>
-                Amortization & payoff planner
+              <div className="flex items-center gap-2">
+                <h1 className={`text-lg sm:text-xl font-extrabold tracking-tight ${heading}`}>
+                  Amortize
+                </h1>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20 tracking-wider">
+                  PRO
+                </span>
+              </div>
+              <p className={`text-xs ${subtext}`}>
+                Interactive Amortization Engine & Strategy Planner
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+
+          {/* Action Toolbar */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Auto-save status */}
+            <div
+              className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-xl border ${
+                isDark
+                  ? "bg-slate-900/60 border-slate-800/80"
+                  : "bg-white border-slate-200 shadow-xs"
+              } ${saveStatus === "saving" ? "text-sky-400" : "text-emerald-400"}`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  saveStatus === "saving"
+                    ? "bg-sky-400 animate-pulse"
+                    : "bg-emerald-400"
+                }`}
+              />
+              <span className="font-semibold text-[11px]">
+                {saveStatus === "saving" ? "Saving…" : "Saved"}
+              </span>
+            </div>
+
+            {/* Google Sync / Auth */}
             {authReady &&
               (userEmail ? (
-                <>
+                <div className="flex items-center gap-1.5">
                   <button
+                    type="button"
                     onClick={initiateSync}
                     disabled={syncBusy}
-                    className={`px-2.5 py-1 rounded-sm text-xs font-semibold transition-colors ${isDark ? "bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer border ${
+                      isDark
+                        ? "bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 border-indigo-500/30"
+                        : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200"
+                    }`}
                   >
-                    {syncBusy ? "Syncing…" : "Sync"}
+                    {syncBusy ? "Syncing…" : "Cloud Sync"}
                   </button>
                   <button
+                    type="button"
                     onClick={signOut}
                     title={`Sign out (${userEmail})`}
-                    className={`max-w-[85px] xs:max-w-[120px] sm:max-w-[180px] truncate px-2 py-1 rounded-sm text-[11px] sm:text-xs font-semibold transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
+                    className={`max-w-[120px] sm:max-w-[160px] truncate px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
+                      isDark
+                        ? "bg-slate-900/60 hover:bg-slate-800 text-slate-300 border-slate-800"
+                        : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs"
+                    }`}
                   >
-                    <span className="sm:hidden">{userEmail.split("@")[0]}</span>
-                    <span className="hidden sm:inline">{userEmail}</span>
+                    {userEmail.split("@")[0]}
                   </button>
-                </>
+                </div>
               ) : (
                 <button
+                  type="button"
                   onClick={signInWithGoogle}
-                  className={`px-2.5 py-1 rounded-sm text-xs font-semibold transition-colors ${isDark ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"}`}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs cursor-pointer ${
+                    isDark
+                      ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border-emerald-500/30"
+                      : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200"
+                  }`}
                 >
-                  Google Login
+                  Sign In
                 </button>
               ))}
-            {/* Save indicator */}
-            <div
-              className={`hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-sm ${isDark ? "bg-white/[0.04]" : "bg-gray-100"} ${saveStatus === "saving" ? "text-sky-400" : "text-emerald-400"}`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${saveStatus === "saving" ? "bg-sky-400 animate-pulse" : "bg-emerald-400"}`}
-              />
-              {saveStatus === "saving" ? "Saving…" : "Saved"}
-            </div>
+
+            {/* Export CSV button */}
             <button
+              type="button"
               onClick={downloadCSV}
-              className={`p-1.5 rounded-sm transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-gray-200" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
-              title="Export CSV"
-            >
-              <Download size={14} />
-            </button>
-            <button
-              onClick={share}
-              className={`p-1.5 rounded-sm transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-gray-200" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
-              title="Share"
-            >
-              <Share2 size={14} />
-            </button>
-            <button
-              onClick={() => setIsDark((p) => !p)}
-              className={`p-1.5 rounded-sm transition-colors ${isDark ? "bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-yellow-300" : "bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-800"}`}
-              title="Toggle theme"
-            >
-              {isDark ? <Sun size={14} /> : <Moon size={14} />}
-            </button>
-          </div>
-        </div>
-
-        {/* ── Tabs ────────────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-4 scrollbar-hide">
-          {loans.map((l) => (
-            <div
-              key={l.id}
-              className={`group flex items-center gap-1 pl-2.5 pr-1.5 py-1.5 rounded-sm text-xs font-medium whitespace-nowrap transition-all border ${
-                activeTabId === l.id
-                  ? "bg-sky-500 text-white border-sky-400"
-                  : isDark
-                    ? "bg-white/[0.04] text-gray-400 border-white/10 hover:bg-white/[0.07] hover:text-gray-200"
-                    : "bg-white border-gray-200 text-gray-600 hover:text-gray-800 hover:border-gray-300"
+              className={`p-2 rounded-xl transition-all border cursor-pointer ${
+                isDark
+                  ? "bg-slate-900/60 hover:bg-slate-800 text-slate-300 border-slate-800"
+                  : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs"
               }`}
+              title="Download Amortization Schedule CSV"
             >
-              {editingTabId === l.id ? (
-                <input
-                  autoFocus
-                  value={editingName}
-                  onChange={(e) => setEditingName(e.target.value)}
-                  onBlur={renameLoan}
-                  onKeyDown={(e) => e.key === "Enter" && renameLoan()}
-                  className="bg-transparent outline-none w-20 text-xs"
-                />
-              ) : (
-                <button onClick={() => setActiveTabId(l.id)}>{l.name}</button>
-              )}
-              <button
-                onClick={() => {
-                  setEditingTabId(l.id);
-                  setEditingName(l.name);
-                }}
-                className={`p-0.5 rounded-sm ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
-              >
-                <Edit2 size={10} />
-              </button>
-              {loans.length > 1 && (
-                <button
-                  onClick={() => deleteLoan(l.id)}
-                  className={`p-0.5 rounded-sm ${activeTabId === l.id ? "hover:bg-white/20" : isDark ? "hover:bg-white/10" : "hover:bg-gray-100"}`}
-                >
-                  <X size={10} />
-                </button>
-              )}
-            </div>
-          ))}
-          <button
-            onClick={addLoan}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-sm text-xs font-medium whitespace-nowrap transition-colors border ${
-              isDark
-                ? "bg-white/[0.04] text-gray-400 hover:bg-white/[0.08] hover:text-gray-200 border-white/10 border-dashed"
-                : "bg-white border-dashed border-gray-300 text-gray-500 hover:text-gray-700 hover:border-gray-400"
-            }`}
-          >
-            <Plus size={12} /> Add loan
-          </button>
-        </div>
+              <Download size={15} />
+            </button>
 
-        {/* ── Summary Cards ───────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-4">
-          {[
-            {
-              label: "Disbursed",
-              value: totals.d,
-              color: "text-sky-400",
-              dot: "bg-sky-400",
-            },
-            {
-              label: "Interest",
-              value: totals.i,
-              color: "text-amber-400",
-              dot: "bg-amber-400",
-            },
-            {
-              label: "Principal",
-              value: totals.p,
-              color: "text-violet-400",
-              dot: "bg-violet-400",
-            },
-            {
-              label: "Saved",
-              value: totals.s,
-              color: "text-emerald-400",
-              dot: "bg-emerald-400",
-            },
-            {
-              label: "Misc Charges",
-              value: totals.m || 0,
-              color: "text-orange-400",
-              dot: "bg-orange-400",
-            },
-            {
-              label: "Paid",
-              value: paidTill,
-              color: "text-teal-400",
-              dot: "bg-teal-400",
-            },
-            {
-              label: "Pending",
-              value: pending,
-              color: "text-rose-400",
-              dot: "bg-rose-400",
-            },
-          ].map(({ label: l, value: v, color, dot }) => (
-            <div key={l} className={`${card} p-2.5 flex flex-col gap-1`}>
-              <div className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-                <span
-                  className={`text-[10px] font-medium tracking-wide uppercase ${subtext}`}
-                >
-                  {l}
-                </span>
-              </div>
-              <span
-                className={`text-sm sm:text-base font-bold font-mono tabular-nums leading-none ${color}`}
-              >
-                {fmt(v)}
-              </span>
-            </div>
-          ))}
-        </div>
+            {/* Share button */}
+            <button
+              type="button"
+              onClick={share}
+              className={`p-2 rounded-xl transition-all border cursor-pointer ${
+                isDark
+                  ? "bg-slate-900/60 hover:bg-slate-800 text-slate-300 border-slate-800"
+                  : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs"
+              }`}
+              title="Share Loan Scenario"
+            >
+              <Share2 size={15} />
+            </button>
 
-        {/* ── Inputs ──────────────────────────────────────────────────────── */}
-        <div className={`${card} p-3 sm:p-4 mb-4`}>
-          <h2 className={`text-xs font-semibold mb-3 uppercase tracking-wide ${heading}`}>
-            Loan Parameters
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
-            {[
-              {
-                lbl: `Principal (${getCurrencySymbol(currency)})`,
-                key: "principal",
-                type: "number",
-                min: 1000,
-                step: 1000,
-              },
-              {
-                lbl: "Interest rate (% p.a.)",
-                key: "rate",
-                type: "number",
-                min: 0,
-                max: 50,
-                step: 0.1,
-              },
-              {
-                lbl: "Tenure (years)",
-                key: "years",
-                type: "number",
-                min: 1,
-                max: 30,
-              },
-              { lbl: "Start date", key: "startDate", type: "date" },
-            ].map(({ lbl, key, type, ...rest }) => (
-              <div key={key}>
-                <label
-                  className={`block text-[10px] font-medium mb-1 uppercase tracking-wide ${label}`}
-                >
-                  {lbl}
-                </label>
-                <input
-                  type={type}
-                  className={`w-full px-2.5 py-1.5 text-xs outline-none transition-all ${surfaceInput}`}
-                  value={(data as any)[key]}
-                  onChange={(e) =>
-                    updateData({
-                      [key]:
-                        type === "number" ? +e.target.value : e.target.value,
-                    } as Partial<LoanData>)
-                  }
-                  {...rest}
-                />
-              </div>
-            ))}
+            {/* Theme Toggle button */}
+            <button
+              type="button"
+              onClick={() => setIsDark((p) => !p)}
+              className={`p-2 rounded-xl transition-all border cursor-pointer ${
+                isDark
+                  ? "bg-slate-900/60 hover:bg-slate-800 text-amber-400 border-slate-800"
+                  : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs"
+              }`}
+              title="Toggle Light / Dark Theme"
+            >
+              {isDark ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
           </div>
+        </header>
 
-          {/* Advanced sections */}
-          <div className={`border-t ${divider} pt-4 space-y-4`}>
-            {/* Disbursements */}
-            <AdvSection
-              title="Disbursements"
-              count={data.dispersals.length}
-              accentClass="text-sky-400"
-              isDark={isDark}
-              tags={data.dispersals
-                .sort(
-                  (a, b) =>
-                    a.month - b.month || (a.day || 1) - (b.day || 1),
-                )
-                .map((d) => ({
-                  label: `M${d.month} · D${d.day || 1} (${getResolvedDate(d.month, d.day || 1)}): ${fmt(d.amount)}`,
-                  color: isDark
-                    ? "bg-sky-500/10 text-sky-300 border-sky-500/20"
-                    : "bg-sky-50 text-sky-700 border-sky-200",
-                  onRemove: () =>
-                    updateData({
-                      dispersals: data.dispersals.filter((x) =>
-                        d.id ? x.id !== d.id : (x.month !== d.month || (x.day || 1) !== (d.day || 1)),
-                      ),
-                    }),
-                  onClick: () => {
-                    setNewDisp({
-                      id: d.id,
-                      month: d.month,
-                      day: d.day || 1,
-                      amount: d.amount,
-                      originalId: d.id || `${d.month}-${d.day || 1}`,
-                    });
-                    setShowDisp(true);
-                  },
-                }))}
-              showForm={showDisp}
-              onAdd={() => {
-                setNewDisp({ month: 1, day: 1, amount: 0 });
-                setShowDisp(true);
-              }}
-              onClose={() => setShowDisp(false)}
-              formContent={
-                <div className="flex flex-wrap gap-2 items-center">
-                  <NumInput
-                    placeholder="Month"
-                    value={newDisp.month}
-                    onChange={(v) => setNewDisp({ ...newDisp, month: v })}
-                    onEnter={addDisp}
-                    isDark={isDark}
-                    min={1}
-                    max={data.years * 12}
-                  />
-                  <NumInput
-                    placeholder="Day (1-31)"
-                    value={newDisp.day}
-                    onChange={(v) =>
-                      setNewDisp({
-                        ...newDisp,
-                        day: Math.min(31, Math.max(1, v)),
-                      })
-                    }
-                    onEnter={addDisp}
-                    isDark={isDark}
-                    min={1}
-                    max={31}
-                  />
-                  <NumInput
-                    placeholder="Amount"
-                    value={newDisp.amount}
-                    onChange={(v) => setNewDisp({ ...newDisp, amount: v })}
-                    onEnter={addDisp}
-                    isDark={isDark}
-                  />
-                  <span
-                    className={`text-[11px] px-2 py-1 rounded font-mono ${
-                      isDark
-                        ? "bg-sky-500/10 text-sky-300 border border-sky-500/20"
-                        : "bg-sky-50 text-sky-700 border border-sky-200"
-                    }`}
-                  >
-                    📅 {getResolvedDate(newDisp.month, newDisp.day)}
-                  </span>
-                  <ActionBtn onClick={addDisp} color="sky" isDark={isDark}>
-                    {newDisp.originalId !== undefined ? "Save" : "Add"}
-                  </ActionBtn>
-                  <CancelBtn
-                    onClick={() => {
-                      setShowDisp(false);
-                      setNewDisp({ month: 1, day: 1, amount: 0 });
-                    }}
-                    isDark={isDark}
-                  />
-                </div>
+        {/* ── Chrome Window & Multiple Loan Container ─────────────────────── */}
+        <div className="w-full">
+          {/* Chrome Tab Strip */}
+          <ChromeLoanTabs
+            loans={loans}
+            activeTabId={activeTabId}
+            onSelectTab={setActiveTabId}
+            onAddTab={addLoan}
+            onDeleteTab={deleteLoan}
+            onRenameTab={(id, newName) => {
+              setLoans((prev) =>
+                prev.map((l) => (l.id === id ? { ...l, name: newName } : l)),
+              );
+            }}
+            onDuplicateTab={duplicateLoan}
+            onOpenComparison={() => setShowComparisonModal(true)}
+            isDark={isDark}
+            currency={currency}
+            locale={locale}
+          />
+
+          {/* Unified Connected Loan Data Container */}
+          <div
+            className={`w-full ${
+              isDark
+                ? "bg-slate-900 border-x border-b border-slate-800"
+                : "bg-white border-x border-b border-slate-200"
+            } rounded-b-3xl shadow-2xl transition-colors duration-200`}
+          >
+            {/* Loan Context Toolbar / Omnibox */}
+            <LoanToolbar
+              activeLoan={activeLoan}
+              loansCount={loans.length}
+              activeLoanIndex={
+                loans.findIndex((l) => l.id === activeTabId) + 1
               }
-            />
-            {/* Custom EMI */}
-            <AdvSection
-              title="Custom EMI"
-              count={data.customEmis.length}
-              accentClass="text-violet-400"
+              totals={totals}
+              schedule={schedule}
               isDark={isDark}
-              tags={data.customEmis
-                .sort(
-                  (a, b) =>
-                    a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1),
-                )
-                .map((e) => ({
-                  label: `M${e.fromMonth} · D${e.day || 1} (${getResolvedDate(e.fromMonth, e.day || 1)}): ${fmt(e.amount)}`,
-                  color: isDark
-                    ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
-                    : "bg-violet-50 text-violet-700 border-violet-200",
-                  onRemove: () =>
-                    updateData({
-                      customEmis: data.customEmis.filter((x) =>
-                        e.id ? x.id !== e.id : (x.fromMonth !== e.fromMonth || (x.day || 1) !== (e.day || 1)),
-                      ),
-                    }),
-                  onClick: () => {
-                    setNewEmi({
-                      id: e.id,
-                      fromMonth: e.fromMonth,
-                      day: e.day || 1,
-                      amount: e.amount.toString(),
-                      originalId: e.id || `${e.fromMonth}-${e.day || 1}`,
-                    });
-                    setShowEmi(true);
-                  },
-                }))}
-              showForm={showEmi}
-              onAdd={() => {
-                setNewEmi({ fromMonth: 1, day: 1, amount: "" });
-                setShowEmi(true);
+              currency={currency}
+              locale={locale}
+              onRename={(newName) => {
+                if (!activeTabId) return;
+                setLoans((prev) =>
+                  prev.map((l) =>
+                    l.id === activeTabId ? { ...l, name: newName } : l,
+                  ),
+                );
               }}
-              onClose={() => setShowEmi(false)}
-              formContent={
-                <div className="flex flex-wrap gap-2 items-center">
-                  <NumInput
-                    placeholder="From month"
-                    value={newEmi.fromMonth}
-                    onChange={(v) => setNewEmi({ ...newEmi, fromMonth: v })}
-                    onEnter={addCEmi}
-                    isDark={isDark}
-                    min={1}
-                    max={data.years * 12}
-                  />
-                  <NumInput
-                    placeholder="Day (1-31)"
-                    value={newEmi.day}
-                    onChange={(v) =>
-                      setNewEmi({
-                        ...newEmi,
-                        day: Math.min(31, Math.max(1, v)),
-                      })
-                    }
-                    onEnter={addCEmi}
-                    isDark={isDark}
-                    min={1}
-                    max={31}
-                  />
-                  <StrInput
-                    placeholder="Amount"
-                    value={newEmi.amount}
-                    onChange={(v) => setNewEmi({ ...newEmi, amount: v })}
-                    onEnter={addCEmi}
-                    isDark={isDark}
-                  />
-                  <span
-                    className={`text-[11px] px-2 py-1 rounded font-mono ${
-                      isDark
-                        ? "bg-violet-500/10 text-violet-300 border border-violet-500/20"
-                        : "bg-violet-50 text-violet-700 border border-violet-200"
-                    }`}
-                  >
-                    📅 {getResolvedDate(newEmi.fromMonth, newEmi.day)}
-                  </span>
-                  <ActionBtn onClick={addCEmi} color="violet" isDark={isDark}>
-                    {newEmi.originalId !== undefined ? "Save" : "Add"}
-                  </ActionBtn>
-                  <CancelBtn
-                    onClick={() => {
-                      setShowEmi(false);
-                      setNewEmi({ fromMonth: 1, day: 1, amount: "" });
-                    }}
-                    isDark={isDark}
-                  />
-                </div>
-              }
+              onDuplicate={() => duplicateLoan(activeTabId)}
+              onShare={share}
+              onExportCSV={downloadCSV}
+              onReset={resetLoan}
             />
-            {/* Lump Sum */}
-            <AdvSection
-              title="Lump Sum"
-              count={data.lumpSums.length}
-              accentClass="text-amber-400"
-              isDark={isDark}
-              tags={data.lumpSums
-                .sort(
-                  (a, b) =>
-                    a.month - b.month || (a.day || 1) - (b.day || 1),
-                )
-                .map((l) => ({
-                  label:
-                    l.month === 0
-                      ? `Down · D${l.day || 1} (${getResolvedDate(1, l.day || 1)}): ${fmt(l.amount)}`
-                      : `M${l.month} · D${l.day || 1} (${getResolvedDate(l.month, l.day || 1)}): ${fmt(l.amount)}`,
-                  color: isDark
-                    ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
-                    : "bg-amber-50 text-amber-700 border-amber-200",
-                  onRemove: () =>
-                    updateData({
-                      lumpSums: data.lumpSums.filter((x) =>
-                        l.id ? x.id !== l.id : (x.month !== l.month || (x.day || 1) !== (l.day || 1)),
-                      ),
-                    }),
-                  onClick: () => {
-                    setNewLump({
-                      id: l.id,
-                      month: l.month,
-                      day: l.day || 1,
-                      amount: l.amount.toString(),
-                      originalId: l.id || `${l.month}-${l.day || 1}`,
-                    });
-                    setShowLump(true);
-                  },
-                }))}
-              showForm={showLump}
-              onAdd={() => {
-                setNewLump({ month: 0, day: 1, amount: "" });
-                setShowLump(true);
-              }}
-              onClose={() => setShowLump(false)}
-              formContent={
-                <div className="flex flex-wrap gap-2 items-center">
-                  <NumInput
-                    placeholder="Month (0=down)"
-                    value={newLump.month}
-                    onChange={(v) => setNewLump({ ...newLump, month: v })}
-                    onEnter={addLS}
-                    isDark={isDark}
-                    min={0}
-                    max={data.years * 12}
-                  />
-                  <NumInput
-                    placeholder="Day (1-31)"
-                    value={newLump.day}
-                    onChange={(v) =>
-                      setNewLump({
-                        ...newLump,
-                        day: Math.min(31, Math.max(1, v)),
-                      })
-                    }
-                    onEnter={addLS}
-                    isDark={isDark}
-                    min={1}
-                    max={31}
-                  />
-                  <StrInput
-                    placeholder="Amount"
-                    value={newLump.amount}
-                    onChange={(v) => setNewLump({ ...newLump, amount: v })}
-                    onEnter={addLS}
-                    isDark={isDark}
-                  />
-                  <span
-                    className={`text-[11px] px-2 py-1 rounded font-mono ${
-                      isDark
-                        ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
-                        : "bg-amber-50 text-amber-700 border border-amber-200"
-                    }`}
-                  >
-                    📅 {getResolvedDate(Math.max(1, newLump.month), newLump.day)}
-                  </span>
-                  <ActionBtn onClick={addLS} color="amber" isDark={isDark}>
-                    {newLump.originalId !== undefined ? "Save" : "Add"}
-                  </ActionBtn>
-                  <CancelBtn
-                    onClick={() => {
-                      setShowLump(false);
-                      setNewLump({ month: 0, day: 1, amount: "" });
-                    }}
-                    isDark={isDark}
-                  />
-                </div>
-              }
-            />
-            {/* Overdraft / Offset Account */}
-            <AdvSection
-              title="Overdraft / Offset"
-              count={(data.baselineOd ? 1 : 0) + (data.customOds?.length || 0)}
-              accentClass="text-emerald-400"
-              isDark={isDark}
-              tags={[
-                ...(data.baselineOd
-                  ? [
-                      {
-                        label: `Baseline OD: ${fmt(data.baselineOd)}`,
-                        color: isDark
-                          ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200",
-                        onRemove: () => updateData({ baselineOd: 0 }),
-                      },
-                    ]
-                  : []),
-                ...(data.customOds || []).map((o) => ({
-                  label: `M${o.fromMonth} OD: ${fmt(o.amount)}`,
-                  color: isDark
-                    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
-                    : "bg-emerald-50 text-emerald-700 border-emerald-200",
-                  onRemove: () =>
-                    updateData({
-                      customOds: (data.customOds || []).filter(
-                        (x) => x.fromMonth !== o.fromMonth,
-                      ),
-                    }),
-                  onClick: () => {
-                    setNewOd({
-                      fromMonth: o.fromMonth,
-                      amount: o.amount.toString(),
-                      originalMonth: o.fromMonth,
-                    });
-                    setShowOd(true);
-                  },
-                })),
-              ]}
-              showForm={showOd}
-              onAdd={() => {
-                setNewOd({ fromMonth: 1, amount: "" });
-                setShowOd(true);
-              }}
-              onClose={() => setShowOd(false)}
-              formContent={
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <span className={`text-xs ${subtext}`}>Baseline OD Balance:</span>
-                    <NumInput
-                      placeholder="Baseline OD Balance"
-                      value={data.baselineOd || 0}
-                      onChange={(v) => updateData({ baselineOd: v })}
-                      onEnter={() => {}}
-                      isDark={isDark}
-                      min={0}
-                    />
+
+            {/* Loan Workspace Inner Content */}
+            <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+              {/* ── Hero Split-Grid: Parameters & Overview Card ──────────────────── */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left: Interactive Loan Parameters Dual Sliders (5 cols) */}
+          <div className={`${card} p-5 sm:p-6 lg:col-span-6 flex flex-col justify-between gap-6`}>
+            <div>
+              <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/5">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400">
+                    <DollarSign size={16} />
                   </div>
-                  <div className={`border-t ${divider} my-1`} />
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <span className={`text-xs ${subtext}`}>Add Monthly OD Balance:</span>
-                    <NumInput
-                      placeholder="From Month"
-                      value={newOd.fromMonth}
-                      onChange={(v) => setNewOd({ ...newOd, fromMonth: v })}
-                      onEnter={addOd}
-                      isDark={isDark}
-                      min={1}
-                    />
-                    <StrInput
-                      placeholder="OD Balance Amount"
-                      value={newOd.amount}
-                      onChange={(v) => setNewOd({ ...newOd, amount: v })}
-                      onEnter={addOd}
-                      isDark={isDark}
-                    />
-                    <ActionBtn onClick={addOd} color="emerald" isDark={isDark}>
-                      {newOd.originalMonth !== undefined ? "Save" : "Add"}
-                    </ActionBtn>
-                    <CancelBtn
-                      onClick={() => {
-                        setShowOd(false);
-                        setNewOd({ fromMonth: 1, amount: "" });
-                      }}
-                      isDark={isDark}
-                    />
+                  <div>
+                    <h2 className={`text-sm font-bold uppercase tracking-wider ${heading}`}>
+                      Loan Parameters
+                    </h2>
+                    <p className={`text-[11px] ${subtext}`}>
+                      Adjust key variables to recalculate instantly
+                    </p>
                   </div>
                 </div>
-              }
-            />
-            {/* Misc Expenses & Charges */}
-            <AdvSection
-              title="Misc Expenses & Charges"
-              count={data.miscExpenses?.length || 0}
-              accentClass="text-orange-400"
-              isDark={isDark}
-              tags={(data.miscExpenses || []).map((m) => ({
-                label: `${m.date}: ${fmt(m.amount)}${m.comments ? ` (${m.comments})` : ""}`,
-                color: isDark
-                  ? "bg-orange-500/10 text-orange-300 border-orange-500/20"
-                  : "bg-orange-50 text-orange-700 border-orange-200",
-                onRemove: () =>
-                  updateData({
-                    miscExpenses: (data.miscExpenses || []).filter(
-                      (x) => x.id !== m.id,
-                    ),
-                  }),
-                onClick: () => {
-                  setNewMisc({
-                    id: m.id,
-                    date: m.date,
-                    amount: m.amount.toString(),
-                    comments: m.comments,
-                    originalId: m.id,
-                  });
-                  setShowMisc(true);
-                },
-              }))}
-              showForm={showMisc}
-              onAdd={() => {
-                setNewMisc({
-                  date: new Date().toISOString().split("T")[0],
-                  amount: "",
-                  comments: "",
-                });
-                setShowMisc(true);
-              }}
-              onClose={() => setShowMisc(false)}
-              formContent={
-                <div className="flex flex-wrap gap-2 items-center">
+              </div>
+
+              <div className="space-y-5">
+                {/* Principal Amount with Dual Slider & Presets */}
+                <SliderInput
+                  label="Loan Amount (Principal)"
+                  value={data.principal}
+                  min={10000}
+                  max={2000000}
+                  step={5000}
+                  prefix={getCurrencySymbol(currency)}
+                  presets={[
+                    { label: "100k", value: 100000 },
+                    { label: "250k", value: 250000 },
+                    { label: "500k", value: 500000 },
+                    { label: "750k", value: 750000 },
+                    { label: "1M", value: 1000000 },
+                  ]}
+                  onChange={(v) => {
+                    const ds = data.dispersals || [];
+                    // Keep initial disbursement in sync if only 1 exists
+                    let nextDs = ds;
+                    if (ds.length <= 1) {
+                      nextDs = [{ month: 1, day: 1, amount: v }];
+                    }
+                    updateData({ principal: v, dispersals: nextDs });
+                  }}
+                  isDark={isDark}
+                  accentColor="sky"
+                />
+
+                {/* Interest Rate with Dual Slider & Presets */}
+                <SliderInput
+                  label="Interest Rate (% p.a.)"
+                  value={data.rate}
+                  min={1.0}
+                  max={25.0}
+                  step={0.1}
+                  suffix="%"
+                  presets={[
+                    { label: "5.5%", value: 5.5 },
+                    { label: "6.5%", value: 6.5 },
+                    { label: "7.5%", value: 7.5 },
+                    { label: "8.5%", value: 8.5 },
+                    { label: "10%", value: 10.0 },
+                  ]}
+                  onChange={(v) => updateData({ rate: v })}
+                  isDark={isDark}
+                  accentColor="amber"
+                />
+
+                {/* Tenure in Years with Dual Slider & Presets */}
+                <SliderInput
+                  label="Loan Tenure (Duration)"
+                  value={data.years}
+                  min={1}
+                  max={30}
+                  step={1}
+                  suffix="yrs"
+                  presets={[
+                    { label: "5y", value: 5 },
+                    { label: "10y", value: 10 },
+                    { label: "15y", value: 15 },
+                    { label: "20y", value: 20 },
+                    { label: "30y", value: 30 },
+                  ]}
+                  onChange={(v) => updateData({ years: Math.max(1, v) })}
+                  isDark={isDark}
+                  accentColor="indigo"
+                />
+
+                {/* Loan Start Date Picker */}
+                <div className="flex items-center justify-between gap-4 pt-2 border-t border-white/5">
+                  <div className="flex items-center gap-2">
+                    <Calendar size={15} className="text-sky-400" />
+                    <div>
+                      <label className={`text-xs font-semibold uppercase tracking-wider block ${subtext}`}>
+                        First Payment Date
+                      </label>
+                      <span className={`text-[11px] ${subtext}`}>
+                        Calendar start for amortization
+                      </span>
+                    </div>
+                  </div>
                   <input
                     type="date"
-                    value={newMisc.date}
-                    onChange={(e) =>
-                      setNewMisc({ ...newMisc, date: e.target.value })
-                    }
-                    className={`px-2 py-1 text-xs rounded-sm border outline-none transition-colors ${
-                      isDark
-                        ? "bg-gray-800 border-gray-700 text-gray-200 focus:border-orange-500"
-                        : "bg-white border-gray-300 text-gray-800 focus:border-orange-500"
-                    }`}
-                  />
-                  <StrInput
-                    placeholder="Amount"
-                    value={newMisc.amount}
-                    onChange={(v) => setNewMisc({ ...newMisc, amount: v })}
-                    onEnter={addMisc}
-                    isDark={isDark}
-                  />
-                  <StrInput
-                    placeholder="Comments / Description"
-                    value={newMisc.comments}
-                    onChange={(v) => setNewMisc({ ...newMisc, comments: v })}
-                    onEnter={addMisc}
-                    isDark={isDark}
-                  />
-                  <ActionBtn onClick={addMisc} color="orange" isDark={isDark}>
-                    {newMisc.originalId !== undefined ? "Save" : "Add"}
-                  </ActionBtn>
-                  <CancelBtn
-                    onClick={() => {
-                      setShowMisc(false);
-                      setNewMisc({
-                        date: new Date().toISOString().split("T")[0],
-                        amount: "",
-                        comments: "",
-                      });
-                    }}
-                    isDark={isDark}
+                    value={data.startDate}
+                    onChange={(e) => updateData({ startDate: e.target.value })}
+                    className={`px-3 py-1.5 text-xs font-medium outline-none transition-all ${surfaceInput}`}
                   />
                 </div>
-              }
-            />
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Hero Monthly EMI & Donut Chart Breakdown (7 cols) */}
+          <div className={`${card} p-5 sm:p-6 lg:col-span-6 flex flex-col justify-between gap-5`}>
+            {/* Top row: Monthly EMI readout */}
+            <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-white/5">
+              <div>
+                <span className={`text-xs font-bold uppercase tracking-wider ${subtext}`}>
+                  Estimated Monthly Payment
+                </span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight text-sky-400">
+                    {fmt(activeEmiEstimate)}
+                  </span>
+                  <span className={`text-xs font-medium ${subtext}`}>/ month</span>
+                </div>
+                {data.customEmis && data.customEmis.length > 0 && (
+                  <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                    ⚡ Custom EMI Rules Applied
+                  </span>
+                )}
+              </div>
+
+              {/* Payoff Acceleration Highlight */}
+              {monthsSaved > 0 && (
+                <div
+                  className={`p-3 rounded-xl border flex items-center gap-2.5 max-w-xs ${
+                    isDark
+                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-300"
+                      : "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  }`}
+                >
+                  <Sparkles size={18} className="shrink-0 text-emerald-400" />
+                  <div className="text-xs">
+                    <div className="font-bold">
+                      Pay off {yearsSaved} years earlier!
+                    </div>
+                    <div className="text-[11px] opacity-80">
+                      Paid in Month {actualPayoffMonth} instead of {scheduledMonths}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Interactive Donut Breakdown Chart */}
+            <div className="flex flex-col sm:flex-row items-center justify-around gap-4 py-1">
+              <LoanBreakdownDonut
+                principal={totals.p || data.principal}
+                interest={totals.i}
+                misc={totals.m}
+                currency={currency}
+                locale={locale}
+                isDark={isDark}
+              />
+
+              {/* Key Quick Breakdown Stats */}
+              <div className="flex flex-col gap-2.5 w-full sm:w-auto">
+                <div className={`p-3 rounded-xl border flex items-center justify-between gap-4 ${
+                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-slate-50 border-slate-200"
+                }`}>
+                  <span className={`text-xs font-medium ${subtext}`}>Total Interest</span>
+                  <span className="text-xs font-bold font-mono text-amber-400">
+                    {fmt(totals.i)}
+                  </span>
+                </div>
+                <div className={`p-3 rounded-xl border flex items-center justify-between gap-4 ${
+                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-slate-50 border-slate-200"
+                }`}>
+                  <span className={`text-xs font-medium ${subtext}`}>Total Interest Saved</span>
+                  <span className="text-xs font-bold font-mono text-emerald-400">
+                    {fmt(totals.s)}
+                  </span>
+                </div>
+                <div className={`p-3 rounded-xl border flex items-center justify-between gap-4 ${
+                  isDark ? "bg-slate-900/60 border-slate-800" : "bg-slate-50 border-slate-200"
+                }`}>
+                  <span className={`text-xs font-medium ${subtext}`}>Total Loan Cost</span>
+                  <span className={`text-xs font-bold font-mono ${heading}`}>
+                    {fmt((totals.p || data.principal) + totals.i + (totals.m || 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* ── Schedule Table ───────────────────────────────────────────────── */}
-        <div className={`${card} overflow-hidden`}>
-          <div className="px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06]">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <h2 className={`text-xs font-semibold uppercase tracking-wide ${heading}`}>
-                Amortization Schedule
+        {/* ── KPI Metric Cards Strip ──────────────────────────────────────── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          <MetricCard
+            label="Disbursed"
+            value={fmt(totals.d)}
+            colorScheme="sky"
+            isDark={isDark}
+            icon={<Wallet size={14} />}
+          />
+          <MetricCard
+            label="Total Interest"
+            value={fmt(totals.i)}
+            colorScheme="amber"
+            isDark={isDark}
+            icon={<Percent size={14} />}
+          />
+          <MetricCard
+            label="Principal Paid"
+            value={fmt(totals.p)}
+            colorScheme="violet"
+            isDark={isDark}
+            icon={<DollarSign size={14} />}
+          />
+          <MetricCard
+            label="Interest Saved"
+            value={fmt(totals.s)}
+            colorScheme="emerald"
+            isDark={isDark}
+            icon={<PiggyBank size={14} />}
+          />
+          <MetricCard
+            label="Fees & Charges"
+            value={fmt(totals.m || 0)}
+            colorScheme="orange"
+            isDark={isDark}
+            icon={<Receipt size={14} />}
+          />
+          <MetricCard
+            label="Paid to Date"
+            value={fmt(paidTill)}
+            colorScheme="teal"
+            isDark={isDark}
+            icon={<CheckCircle2 size={14} />}
+          />
+          <MetricCard
+            label="Pending Balance"
+            value={fmt(pending)}
+            colorScheme="rose"
+            isDark={isDark}
+            icon={<Clock size={14} />}
+          />
+        </div>
+
+        {/* ── Interactive Amortization Payoff Area Chart ───────────────────── */}
+        <div className={`${card} p-5 sm:p-6`}>
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/5">
+            <div>
+              <h2 className={`text-sm font-bold uppercase tracking-wider ${heading}`}>
+                Amortization Payoff Trajectory
               </h2>
-              <button
-                type="button"
-                onClick={toggleAllMonths}
-                className={`text-[10px] px-2 py-0.5 rounded cursor-pointer transition-colors ${
-                  isDark
-                    ? "bg-white/10 hover:bg-white/20 text-gray-200"
-                    : "bg-gray-200 hover:bg-gray-300 text-gray-800"
-                }`}
-                title="Expand or collapse all months to see day-wise calculations"
-              >
-                {schedule.length > 0 && schedule.every((r) => expandedMonths[r.m])
-                  ? "Collapse All"
-                  : "Expand All Days"}
-              </button>
-            </div>
-            <div className="flex items-center gap-2 sm:gap-3">
-              <span className={`text-[11px] ${subtext}`}>
-                {schedule.filter((r) => r.emi > 0).length} payments
-              </span>
-              <button
-                type="button"
-                onClick={exportDailyData}
-                className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer transition-colors ${
-                  isDark
-                    ? "bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30"
-                    : "bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200"
-                }`}
-                title="Export complete Day-Wise Granular Schedule CSV"
-              >
-                <Download className="w-3 h-3" /> Daily CSV
-              </button>
+              <p className={`text-[11px] ${subtext}`}>
+                Interactive balance decline over the loan tenure vs cumulative paid principal
+              </p>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr
-                  className={`border-t ${divider} ${isDark ? "bg-white/[0.02]" : "bg-gray-50"}`}
-                >
-                  {[
-                    "Mo",
-                    "Date",
-                    "Status",
-                    "Disb",
-                    "EMI",
-                    "Std EMI",
-                    "Custom EMI",
-                    "Lump",
-                    "Principal",
-                    "Interest",
-                    "Saved",
-                    ...(hasOd ? ["OD Bal"] : []),
-                    "Balance",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className={`px-2 py-2 text-left font-semibold uppercase tracking-wide text-[10px] ${subtext} whitespace-nowrap`}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {schedule.map((r) => {
-                  const isCur = r.m === cm,
-                    isPaid = r.m < cm,
-                    isExpanded = !!expandedMonths[r.m];
-                  return (
-                    <Fragment key={r.m}>
-                      <tr
-                        className={`border-t transition-colors ${divider} ${
-                          isCur
-                            ? isDark
-                              ? "bg-sky-500/[0.08]"
-                              : "bg-sky-50"
-                            : r.payType === "lump"
-                              ? isDark
-                                ? "bg-amber-500/[0.04]"
-                                : "bg-amber-50/60"
-                              : r.payType === "custom"
-                                ? isDark
-                                  ? "bg-violet-500/[0.04]"
-                                  : "bg-violet-50/60"
-                                : isDark
-                                  ? "hover:bg-white/[0.02]"
-                                  : "hover:bg-gray-50"
-                        }`}
+          <AmortizationAreaChart
+            schedule={schedule}
+            currency={currency}
+            locale={locale}
+            isDark={isDark}
+          />
+        </div>
+
+        {/* ── Advanced Financial Adjustments (Horizontal Workbench & Grid) ── */}
+        <div className={`${card} p-5 sm:p-6`}>
+          <AdvancedStrategies
+            data={data}
+            updateData={updateData}
+            currency={currency}
+            locale={locale}
+            isDark={isDark}
+            getResolvedDate={getResolvedDate}
+          />
+        </div>
+
+        {/* ── Amortization Schedule Table ─────────────────────────────────── */}
+        <div className={`${card} overflow-hidden`}>
+          {/* Schedule Controls & Filters Header */}
+          <ScheduleFilters
+            viewMode={scheduleViewMode}
+            onViewModeChange={setScheduleViewMode}
+            filterMode={scheduleFilterMode}
+            onFilterModeChange={setScheduleFilterMode}
+            allExpanded={
+              schedule.length > 0 && schedule.every((r) => expandedMonths[r.m])
+            }
+            onToggleAllMonths={toggleAllMonths}
+            onExportDailyCSV={exportDailyData}
+            onExportMonthlyCSV={downloadCSV}
+            totalPaymentsCount={schedule.filter((r) => r.emi > 0).length}
+            isDark={isDark}
+          />
+
+          {/* Conditional Rendering: Yearly View vs Monthly View */}
+          {scheduleViewMode === "yearly" ? (
+            <div className="p-3 sm:p-4">
+              <YearlyScheduleTable
+                schedule={schedule}
+                currency={currency}
+                locale={locale}
+                isDark={isDark}
+                hasOd={hasOd}
+                cm={cm}
+                expandedMonths={expandedMonths}
+                toggleMonth={toggleMonth}
+                renderDailyBreakdown={renderDailyBreakdown}
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr
+                    className={`border-b ${divider} ${
+                      isDark ? "bg-slate-900/40" : "bg-slate-50/80"
+                    }`}
+                  >
+                    {[
+                      "Mo",
+                      "Date",
+                      "Status",
+                      "Disbursement",
+                      "Monthly EMI",
+                      "Std EMI",
+                      "Custom EMI",
+                      "Lump Sum",
+                      "Principal Paid",
+                      "Interest Paid",
+                      "Interest Saved",
+                      ...(hasOd ? ["OD Balance"] : []),
+                      "Closing Balance",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className={`px-3 py-2.5 text-left font-semibold uppercase tracking-wider text-[10px] ${subtext} whitespace-nowrap`}
                       >
-                        <td
-                          className={`px-2 py-1.5 font-medium ${heading} whitespace-nowrap`}
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSchedule.map((r) => {
+                    const isCur = r.m === cm;
+                    const isPaid = r.m < cm;
+                    const isExpanded = !!expandedMonths[r.m];
+
+                    return (
+                      <Fragment key={r.m}>
+                        <tr
+                          className={`border-b transition-colors ${divider} ${
+                            isCur
+                              ? isDark
+                                ? "bg-sky-500/10 hover:bg-sky-500/15"
+                                : "bg-sky-50 hover:bg-sky-100/70"
+                              : r.payType === "lump"
+                              ? isDark
+                                ? "bg-amber-500/[0.06] hover:bg-amber-500/[0.1]"
+                                : "bg-amber-50/70 hover:bg-amber-100/60"
+                              : r.payType === "custom"
+                              ? isDark
+                                ? "bg-violet-500/[0.06] hover:bg-violet-500/[0.1]"
+                                : "bg-violet-50/70 hover:bg-violet-100/60"
+                              : isDark
+                              ? "hover:bg-slate-800/30"
+                              : "hover:bg-slate-100/60"
+                          }`}
                         >
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => toggleMonth(r.m)}
-                              className={`p-0.5 rounded cursor-pointer transition-colors ${
-                                isDark
-                                  ? "hover:bg-white/10 text-gray-300"
-                                  : "hover:bg-gray-200 text-gray-600"
-                              }`}
-                              title={isExpanded ? "Collapse day-wise details" : "Expand day-wise details"}
-                            >
-                              {isExpanded ? (
-                                <ChevronDown className="w-3.5 h-3.5 text-sky-400" />
-                              ) : (
-                                <ChevronRight className="w-3.5 h-3.5 opacity-60 hover:opacity-100" />
-                              )}
-                            </button>
-                            <span>{r.m}</span>
-                            {isCur && (
-                              <span className="ml-1 px-1 py-0.2 bg-sky-500 text-white rounded-sm text-[8px] font-bold tracking-wide">
-                                NOW
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td
-                          className={`px-2 py-1.5 ${subtext} whitespace-nowrap`}
-                        >
-                          {r.date}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          {r.emi > 0 ? (
-                            isPaid ? (
-                              <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                ✓ Paid
-                              </span>
-                            ) : isCur ? (
-                              <span className="px-1.5 py-0.5 rounded-sm text-[9px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                                Current
-                              </span>
-                            ) : (
-                              <span
-                                className={`px-1.5 py-0.5 rounded-sm text-[9px] font-semibold ${isDark ? "bg-white/[0.04] text-gray-500 border border-white/[0.06]" : "bg-gray-100 text-gray-400 border border-gray-200"}`}
+                          <td className={`px-3 py-2.5 font-bold ${heading} whitespace-nowrap`}>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => toggleMonth(r.m)}
+                                className={`p-1 rounded-md transition-colors cursor-pointer ${
+                                  isDark ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-200 text-slate-600"
+                                }`}
+                                title={
+                                  isExpanded
+                                    ? "Collapse day-wise details"
+                                    : "Expand day-wise details"
+                                }
                               >
-                                Pending
-                              </span>
-                            )
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-sky-400 font-mono">
-                          {r.disbAmt > 0 ? (
-                            fmt(r.disbAmt)
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        <td
-                          className={`px-2 py-1.5 font-mono font-semibold ${heading}`}
-                        >
-                          {r.emi > 0 ? (
-                            fmt(r.emi)
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        <td className={`px-2 py-1.5 font-mono ${subtext}`}>
-                          {r.stdEmi > 0 ? (
-                            fmt(r.stdEmi)
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-violet-400 font-mono">
-                          {r.customEmiAmt ? (
-                            fmt(r.customEmiAmt)
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-amber-400 font-mono">
-                          {r.lumpAmt ? (
-                            fmt(r.lumpAmt)
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-teal-400 font-mono">
-                          {r.prinPay > 0 ? (
-                            fmt(r.prinPay)
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-amber-400 font-mono">
-                          {r.intPay > 0 ? (
-                            fmt(r.intPay)
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-emerald-400 font-mono font-semibold">
-                          {r.interestSaved > 0 ? (
-                            fmt(r.interestSaved)
-                          ) : (
-                            <span className={subtext}>—</span>
-                          )}
-                        </td>
-                        {hasOd && (
-                          <td className="px-2 py-1.5 text-emerald-400 font-mono">
-                            {r.odBal > 0 ? (
-                              fmt(r.odBal)
+                                {isExpanded ? (
+                                  <ChevronDown size={14} className="text-sky-400" />
+                                ) : (
+                                  <ChevronRight size={14} className="opacity-60 hover:opacity-100" />
+                                )}
+                              </button>
+                              <span>M{r.m}</span>
+                              {isCur && (
+                                <span className="ml-1 px-1.5 py-0.2 bg-sky-500 text-white rounded-full text-[8px] font-bold tracking-wide">
+                                  NOW
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className={`px-3 py-2.5 ${subtext} whitespace-nowrap font-medium`}>
+                            {r.date}
+                          </td>
+
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            {r.emi > 0 ? (
+                              isPaid ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                  ✓ Paid
+                                </span>
+                              ) : isCur ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                  Current
+                                </span>
+                              ) : (
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                    isDark
+                                      ? "bg-slate-800/60 text-slate-400 border border-slate-700"
+                                      : "bg-slate-100 text-slate-500 border border-slate-200"
+                                  }`}
+                                >
+                                  Pending
+                                </span>
+                              )
                             ) : (
                               <span className={subtext}>—</span>
                             )}
                           </td>
-                        )}
-                        <td
-                          className={`px-2 py-1.5 font-mono font-semibold ${heading}`}
-                        >
-                          {fmt(r.remaining)}
-                        </td>
-                      </tr>
 
-                      {/* Day-Wise Granular Breakdown Sub-Table */}
-                      {isExpanded && r.days && r.days.length > 0 && (
-                        <tr className={`${isDark ? "bg-[#090b0e]" : "bg-gray-50/70"}`}>
-                          <td colSpan={hasOd ? 13 : 12} className="p-0">
-                            <div className={`p-3 border-y ${divider}`}>
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[11px] font-semibold tracking-wide uppercase text-sky-400">
-                                    Month {r.m} ({r.date}) — Day-Wise Granular Breakdown
-                                  </span>
-                                  <span className={`text-[10px] ${subtext}`}>
-                                    ({r.days.length} days · {r.days.filter((d) => (d.events?.length || 0) > 0).length} active events)
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="overflow-x-auto max-h-[360px] overflow-y-auto rounded border border-white/5 shadow-inner">
-                                <table className="w-full text-[11px]">
-                                  <thead className={`sticky top-0 ${isDark ? "bg-gray-900" : "bg-gray-100"} shadow-sm`}>
-                                    <tr className={`border-b ${divider}`}>
-                                      <th className={`px-2 py-1.5 text-left font-semibold text-[10px] ${subtext}`}>Day / Date</th>
-                                      <th className={`px-2 py-1.5 text-left font-semibold text-[10px] ${subtext}`}>Events</th>
-                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Disb</th>
-                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Payment / EMI</th>
-                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Lump Sum</th>
-                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Prin Repaid</th>
-                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Daily Interest</th>
-                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Saved</th>
-                                      {hasOd && <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>OD Bal</th>}
-                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Net Balance</th>
-                                      <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Closing Balance</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {r.days.map((d) => {
-                                      const hasEvent = d.events && d.events.length > 0;
-                                      return (
-                                        <tr
-                                          key={d.day}
-                                          className={`border-b transition-colors ${divider} ${
-                                            hasEvent
-                                              ? isDark
-                                                ? "bg-sky-500/[0.07]"
-                                                : "bg-sky-50/50"
-                                              : isDark
-                                                ? "hover:bg-white/[0.02]"
-                                                : "hover:bg-gray-100/50"
-                                          }`}
-                                        >
-                                          <td className="px-2 py-1 whitespace-nowrap font-mono text-[10px]">
-                                            <span className="font-semibold text-sky-400">D{d.day}</span>{" "}
-                                            <span className={subtext}>({d.date.split(",")[0]})</span>
-                                          </td>
-                                          <td className="px-2 py-1">
-                                            {d.events && d.events.length > 0 ? (
-                                              <div className="flex flex-wrap gap-1">
-                                                {d.events.map((ev, i) => (
-                                                  <span
-                                                    key={i}
-                                                    className="px-1.5 py-0.2 rounded text-[9px] font-medium bg-sky-500/10 text-sky-300 border border-sky-500/20"
-                                                  >
-                                                    {ev}
-                                                  </span>
-                                                ))}
-                                              </div>
-                                            ) : (
-                                              <span className={subtext}>—</span>
-                                            )}
-                                          </td>
-                                          <td className="px-2 py-1 text-right font-mono text-sky-400">
-                                            {d.disbAmt > 0 ? fmt(d.disbAmt) : <span className={subtext}>—</span>}
-                                          </td>
-                                          <td className="px-2 py-1 text-right font-mono">
-                                            {d.emiAmt > 0 ? fmt(d.emiAmt) : <span className={subtext}>—</span>}
-                                          </td>
-                                          <td className="px-2 py-1 text-right font-mono text-amber-400">
-                                            {d.lumpAmt > 0 ? fmt(d.lumpAmt) : <span className={subtext}>—</span>}
-                                          </td>
-                                          <td className="px-2 py-1 text-right font-mono text-teal-400">
-                                            {d.prinPay > 0 ? fmt(d.prinPay) : <span className={subtext}>—</span>}
-                                          </td>
-                                          <td className="px-2 py-1 text-right font-mono text-amber-400">
-                                            {d.intPay > 0 ? fmt(d.intPay) : <span className={subtext}>—</span>}
-                                          </td>
-                                          <td className="px-2 py-1 text-right font-mono text-emerald-400">
-                                            {d.interestSaved > 0 ? fmt(d.interestSaved) : <span className={subtext}>—</span>}
-                                          </td>
-                                          {hasOd && (
-                                            <td className="px-2 py-1 text-right font-mono text-emerald-400">
-                                              {d.odBal > 0 ? fmt(d.odBal) : <span className={subtext}>—</span>}
-                                            </td>
-                                          )}
-                                          <td className="px-2 py-1 text-right font-mono">
-                                            {fmt(d.netPrincipal)}
-                                          </td>
-                                          <td className="px-2 py-1 text-right font-mono font-semibold">
-                                            {fmt(d.balance)}
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                  <tfoot className={`font-semibold ${isDark ? "bg-white/[0.03]" : "bg-gray-100"}`}>
-                                    <tr className={`border-t ${divider}`}>
-                                      <td className="px-2 py-1.5" colSpan={2}>
-                                        Month {r.m} Totals
-                                      </td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-sky-400">
-                                        {r.disbAmt > 0 ? fmt(r.disbAmt) : "—"}
-                                      </td>
-                                      <td className="px-2 py-1.5 text-right font-mono">
-                                        {r.emi > 0 ? fmt(r.emi) : "—"}
-                                      </td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-amber-400">
-                                        {r.lumpAmt ? fmt(r.lumpAmt) : "—"}
-                                      </td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-teal-400">
-                                        {fmt(r.prinPay)}
-                                      </td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-amber-400">
-                                        {fmt(r.intPay)}
-                                      </td>
-                                      <td className="px-2 py-1.5 text-right font-mono text-emerald-400">
-                                        {r.interestSaved > 0 ? fmt(r.interestSaved) : "—"}
-                                      </td>
-                                      {hasOd && (
-                                        <td className="px-2 py-1.5 text-right font-mono text-emerald-400">
-                                          {r.odBal > 0 ? fmt(r.odBal) : "—"}
-                                        </td>
-                                      )}
-                                      <td className="px-2 py-1.5 text-right font-mono">
-                                        —
-                                      </td>
-                                      <td className="px-2 py-1.5 text-right font-mono font-bold">
-                                        {fmt(r.remaining)}
-                                      </td>
-                                    </tr>
-                                  </tfoot>
-                                </table>
-                              </div>
-                            </div>
+                          <td className="px-3 py-2.5 text-sky-400 font-mono font-medium">
+                            {r.disbAmt > 0 ? fmt(r.disbAmt) : <span className={subtext}>—</span>}
+                          </td>
+
+                          <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
+                            {r.emi > 0 ? fmt(r.emi) : <span className={subtext}>—</span>}
+                          </td>
+
+                          <td className={`px-3 py-2.5 font-mono ${subtext}`}>
+                            {r.stdEmi > 0 ? fmt(r.stdEmi) : <span className={subtext}>—</span>}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-violet-400 font-mono font-medium">
+                            {r.customEmiAmt ? fmt(r.customEmiAmt) : <span className={subtext}>—</span>}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
+                            {r.lumpAmt ? fmt(r.lumpAmt) : <span className={subtext}>—</span>}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
+                            {r.prinPay > 0 ? fmt(r.prinPay) : <span className={subtext}>—</span>}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
+                            {r.intPay > 0 ? fmt(r.intPay) : <span className={subtext}>—</span>}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-emerald-400 font-mono font-bold">
+                            {r.interestSaved > 0 ? fmt(r.interestSaved) : <span className={subtext}>—</span>}
+                          </td>
+
+                          {hasOd && (
+                            <td className="px-3 py-2.5 text-emerald-400 font-mono">
+                              {r.odBal > 0 ? fmt(r.odBal) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
+
+                          <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
+                            {fmt(r.remaining)}
                           </td>
                         </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+
+                        {/* Day-Wise Granular Breakdown Sub-Table */}
+                        {isExpanded && renderDailyBreakdown(r)}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+            </div>
           </div>
         </div>
       </div>
 
       <style>{`
         @keyframes slideIn { from { opacity: 0; transform: translateY(-8px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes scaleUp { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+        .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+        .animate-scaleUp { animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
       `}</style>
     </div>
   );
