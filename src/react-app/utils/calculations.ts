@@ -74,11 +74,27 @@ export const calculateSchedule = (
     dispersals: ds,
     customEmis: ces,
     lumpSums: ls,
+    customRates: crs = [],
     principal,
   } = data;
 
   const tm = Math.max(1, (y || 1) * 12);
   const rows: ScheduleRow[] = [];
+
+  // Sort custom rates chronologically
+  const sortedCustomRates = [...crs].sort(
+    (a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1),
+  );
+
+  // Helper to determine the effective rate on month m and day d
+  const getActiveRate = (m: number, d: number): number => {
+    if (sortedCustomRates.length === 0) return rate;
+    const applicable = sortedCustomRates.filter(
+      (r) => r.fromMonth < m || (r.fromMonth === m && (r.day || 1) <= d),
+    );
+    if (applicable.length === 0) return rate;
+    return applicable[applicable.length - 1].rate;
+  };
 
   // If no explicit dispersals, default to a Month 1 disbursement of principal
   const initialParts = sd ? sd.split("-").map(Number) : [];
@@ -111,8 +127,6 @@ export const calculateSchedule = (
 
   for (let m = 1; m <= tm; m++) {
     const cal = getMonthCalendarInfo(sd, m);
-    const dailyRate = (rate / 100) / cal.daysInYear;
-    const monthlyRate = rate / 100 / 12;
 
     // Benchmark disbursements for month m
     const mDisbs = effectiveDispersals.filter((d) => d.month === m);
@@ -128,6 +142,10 @@ export const calculateSchedule = (
     }
 
     // Standard EMI target for benchmark
+    const defaultEmiDay = Math.min(cal.daysInMonth, Math.max(1, cal.startDay));
+    const benchEmiRate = getActiveRate(m, defaultEmiDay);
+    const monthlyRate = benchEmiRate / 100 / 12;
+
     const rm = tm - m + 1;
     // Estimated pre-payment principal for standard EMI formula
     const preRem = benchRem + (dayDisbMap[cal.startDay] || 0);
@@ -139,7 +157,6 @@ export const calculateSchedule = (
           : (preRem * monthlyRate * Math.pow(1 + monthlyRate, rm)) /
             (Math.pow(1 + monthlyRate, rm) - 1);
 
-    const defaultEmiDay = Math.min(cal.daysInMonth, Math.max(1, cal.startDay));
     let benchMonthInt = 0;
     const benchDailyInt: number[] = [];
 
@@ -153,6 +170,8 @@ export const calculateSchedule = (
         if (pp > benchRem) pp = benchRem;
         if (pp > 0) benchRem = Math.max(0, benchRem - pp);
       }
+      const dayRate = getActiveRate(m, d);
+      const dailyRate = (dayRate / 100) / cal.daysInYear;
       const dayInt = benchRem * dailyRate;
       benchMonthInt += dayInt;
       benchDailyInt.push(dayInt);
@@ -171,8 +190,6 @@ export const calculateSchedule = (
 
   for (let m = 1; m <= tm; m++) {
     const cal = getMonthCalendarInfo(sd, m);
-    const dailyRate = (rate / 100) / cal.daysInYear;
-    const monthlyRate = rate / 100 / 12;
     const odb = getOD(m);
 
     // Disbursements in this month
@@ -209,6 +226,7 @@ export const calculateSchedule = (
           day: d,
           date: dateStr,
           fullDate,
+          rate: getActiveRate(m, d),
           disbAmt: 0,
           emiAmt: 0,
           lumpAmt: 0,
@@ -224,6 +242,7 @@ export const calculateSchedule = (
       rows.push({
         m,
         date: monthDate.toLocaleDateString(locale, { year: "numeric", month: "short" }),
+        rate: getActiveRate(m, 1),
         disbAmt: 0,
         emi: 0,
         prinPay: 0,
@@ -247,6 +266,9 @@ export const calculateSchedule = (
       : undefined;
     const defaultEmiDay = Math.min(cal.daysInMonth, Math.max(1, cal.startDay));
     const emiDay = customEmiDay ?? defaultEmiDay;
+
+    const emiDayRate = getActiveRate(m, emiDay);
+    const monthlyRate = emiDayRate / 100 / 12;
 
     // Standard EMI formula for remaining term
     const approxPreRem = actualRem + (dayDisbMap[emiDay] || 0);
@@ -273,6 +295,16 @@ export const calculateSchedule = (
     for (let d = 1; d <= cal.daysInMonth; d++) {
       const { dateStr, fullDate } = formatDayDate(cal.year, cal.monthIndex, d, locale);
       const dayEvents: string[] = [];
+      const dayRate = getActiveRate(m, d);
+      const dailyRate = (dayRate / 100) / cal.daysInYear;
+
+      // Rate change effective on this day
+      const rateChangeOnDay = sortedCustomRates.find(
+        (r) => r.fromMonth === m && (r.day || 1) === d,
+      );
+      if (rateChangeOnDay) {
+        dayEvents.push(`Interest Rate: ${rateChangeOnDay.rate}% p.a.`);
+      }
 
       // 1. Disbursement on day d
       const dDisb = dayDisbMap[d] || 0;
@@ -299,7 +331,8 @@ export const calculateSchedule = (
       let dayEmiAmt = 0;
       if (d === emiDay && actualRem > 0) {
         const netBeforeEmi = Math.max(0, actualRem - odb);
-        const estMonthlyInt = netBeforeEmi * monthlyRate;
+        const dayMonthlyRate = dayRate / 100 / 12;
+        const estMonthlyInt = netBeforeEmi * dayMonthlyRate;
         let pp = targetEmiAmt - estMonthlyInt;
         if (pp > actualRem) pp = actualRem;
         if (pp > 0) {
@@ -330,6 +363,7 @@ export const calculateSchedule = (
         day: d,
         date: dateStr,
         fullDate,
+        rate: dayRate,
         disbAmt: dDisb,
         emiAmt: dayEmiAmt,
         lumpAmt: actualDayLump,
@@ -357,6 +391,7 @@ export const calculateSchedule = (
         year: "numeric",
         month: "short",
       }),
+      rate: emiDayRate,
       disbAmt: monthDisb,
       emi: monthEmi,
       prinPay: monthPrinPay,
@@ -376,6 +411,8 @@ export const calculateSchedule = (
       // Loan fully repaid early: fill remaining months with empty zero rows
       for (let r = m + 1; r <= tm; r++) {
         const nextCal = getMonthCalendarInfo(sd, r);
+        const rEmiDay = Math.min(nextCal.daysInMonth, Math.max(1, nextCal.startDay));
+        const rRate = getActiveRate(r, rEmiDay);
         const emptyDays: DayDetail[] = [];
         for (let d = 1; d <= nextCal.daysInMonth; d++) {
           const { dateStr, fullDate } = formatDayDate(nextCal.year, nextCal.monthIndex, d, locale);
@@ -383,6 +420,7 @@ export const calculateSchedule = (
             day: d,
             date: dateStr,
             fullDate,
+            rate: getActiveRate(r, d),
             disbAmt: 0,
             emiAmt: 0,
             lumpAmt: 0,
@@ -400,6 +438,7 @@ export const calculateSchedule = (
             year: "numeric",
             month: "short",
           }),
+          rate: rRate,
           disbAmt: 0,
           emi: 0,
           prinPay: 0,

@@ -2,7 +2,7 @@ import React from "react";
 
 interface ActionBtnProps {
   onClick: () => void;
-  color: "sky" | "violet" | "amber" | "emerald" | "orange";
+  color: "sky" | "violet" | "amber" | "emerald" | "orange" | "indigo";
   isDark: boolean;
   children: React.ReactNode;
 }
@@ -18,6 +18,7 @@ export function ActionBtn({
     amber: "bg-amber-500 hover:bg-amber-400 text-white shadow-amber-500/20",
     emerald: "bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20",
     orange: "bg-orange-500 hover:bg-orange-400 text-white shadow-orange-500/20",
+    indigo: "bg-indigo-500 hover:bg-indigo-400 text-white shadow-indigo-500/20",
   };
   return (
     <button

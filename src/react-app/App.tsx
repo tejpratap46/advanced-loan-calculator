@@ -18,6 +18,7 @@ import {
   Clock,
   Sparkles,
   Calendar,
+  TrendingUp,
 } from "lucide-react";
 
 // Types
@@ -52,7 +53,10 @@ import { decodeData, getShareUrl } from "./utils/share";
 // UI Components
 import { SliderInput } from "./components/ui/SliderInput";
 import { MetricCard } from "./components/ui/MetricCard";
-import { AdvancedStrategies } from "./components/strategies/AdvancedStrategies";
+import {
+  AdvancedStrategies,
+  type StrategyTab,
+} from "./components/strategies/AdvancedStrategies";
 
 // Chart Components
 import { LoanBreakdownDonut } from "./components/charts/LoanBreakdownDonut";
@@ -96,6 +100,7 @@ export default function LoanCalculator() {
   const [scheduleFilterMode, setScheduleFilterMode] = useState<FilterMode>("all");
 
   const [expandedMonths, setExpandedMonths] = useState<Record<number, boolean>>({});
+  const [strategyTab, setStrategyTab] = useState<StrategyTab>("dispersals");
 
   const activeLoan = loans.find((l) => l.id === activeTabId);
   const data = activeLoan?.data || DEFAULT_DATA;
@@ -601,6 +606,9 @@ export default function LoanCalculator() {
                     <td className="px-2 py-1 whitespace-nowrap font-mono text-[10px]">
                       <span className="font-bold text-sky-400">D{d.day}</span>{" "}
                       <span className={subtext}>({d.date.split(",")[0]})</span>
+                      {d.rate !== undefined && (
+                        <span className="ml-1 text-[9px] text-indigo-400 font-medium">· {d.rate}%</span>
+                      )}
                     </td>
                     <td className="px-2 py-1">
                       {d.events && d.events.length > 0 ? (
@@ -1124,24 +1132,48 @@ export default function LoanCalculator() {
                 />
 
                 {/* Interest Rate with Dual Slider & Presets */}
-                <SliderInput
-                  label="Interest Rate (% p.a.)"
-                  value={data.rate}
-                  min={1.0}
-                  max={25.0}
-                  step={0.1}
-                  suffix="%"
-                  presets={[
-                    { label: "5.5%", value: 5.5 },
-                    { label: "6.5%", value: 6.5 },
-                    { label: "7.5%", value: 7.5 },
-                    { label: "8.5%", value: 8.5 },
-                    { label: "10%", value: 10.0 },
-                  ]}
-                  onChange={(v) => updateData({ rate: v })}
-                  isDark={isDark}
-                  accentColor="amber"
-                />
+                <div className="space-y-1.5">
+                  <SliderInput
+                    label="Interest Rate (% p.a.)"
+                    value={data.rate}
+                    min={1.0}
+                    max={25.0}
+                    step={0.1}
+                    suffix="%"
+                    presets={[
+                      { label: "5.5%", value: 5.5 },
+                      { label: "6.5%", value: 6.5 },
+                      { label: "7.5%", value: 7.5 },
+                      { label: "8.5%", value: 8.5 },
+                      { label: "10%", value: 10.0 },
+                    ]}
+                    onChange={(v) => updateData({ rate: v })}
+                    isDark={isDark}
+                    accentColor="amber"
+                  />
+                  <div className="flex items-center justify-between text-[11px] px-1 pt-0.5">
+                    <span className={subtext}>
+                      {data.customRates && data.customRates.length > 0 ? (
+                        <span className="text-indigo-400 font-medium">
+                          ⚡ Variable: {data.customRates.length} update{data.customRates.length > 1 ? "s" : ""} scheduled
+                        </span>
+                      ) : (
+                        <span>Initial base rate from Month 1</span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStrategyTab("rates");
+                        document.getElementById("advanced-strategies-section")?.scrollIntoView({ behavior: "smooth" });
+                      }}
+                      className="text-indigo-400 hover:underline cursor-pointer font-semibold flex items-center gap-1"
+                    >
+                      <TrendingUp size={11} />
+                      <span>{data.customRates && data.customRates.length > 0 ? "Manage Rates" : "+ Schedule Rate Change"}</span>
+                    </button>
+                  </div>
+                </div>
 
                 {/* Tenure in Years with Dual Slider & Presets */}
                 <SliderInput
@@ -1346,7 +1378,7 @@ export default function LoanCalculator() {
         </div>
 
         {/* ── Advanced Financial Adjustments (Horizontal Workbench & Grid) ── */}
-        <div className={`${card} p-5 sm:p-6`}>
+        <div id="advanced-strategies-section" className={`${card} p-5 sm:p-6`}>
           <AdvancedStrategies
             data={data}
             updateData={updateData}
@@ -1354,6 +1386,8 @@ export default function LoanCalculator() {
             locale={locale}
             isDark={isDark}
             getResolvedDate={getResolvedDate}
+            externalActiveTab={strategyTab}
+            onActiveTabChange={setStrategyTab}
           />
         </div>
 
@@ -1402,6 +1436,7 @@ export default function LoanCalculator() {
                     {[
                       "Mo",
                       "Date",
+                      "Rate",
                       "Status",
                       "Disbursement",
                       "Monthly EMI",
@@ -1481,6 +1516,10 @@ export default function LoanCalculator() {
 
                           <td className={`px-3 py-2.5 ${subtext} whitespace-nowrap font-medium`}>
                             {r.date}
+                          </td>
+
+                          <td className="px-3 py-2.5 font-mono text-xs text-indigo-400 whitespace-nowrap font-medium">
+                            {r.rate !== undefined ? `${r.rate}%` : "—"}
                           </td>
 
                           <td className="px-3 py-2.5 whitespace-nowrap">

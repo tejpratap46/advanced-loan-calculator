@@ -62,6 +62,7 @@ export function LoanComparisonModal({
         (l.data.dispersals?.length || 0) +
         (l.data.customEmis?.length || 0) +
         (l.data.lumpSums?.length || 0) +
+        (l.data.customRates?.length || 0) +
         (l.data.baselineOd ? 1 : 0);
 
       return {
@@ -189,7 +190,7 @@ export function LoanComparisonModal({
                             isDark ? "text-slate-400" : "text-slate-500"
                           }`}
                         >
-                          {fmt(c.loan.data.principal)} @ {c.loan.data.rate}% ·{" "}
+                          {fmt(c.loan.data.principal)} @ {c.loan.data.rate}%{c.loan.data.customRates && c.loan.data.customRates.length > 0 ? " (Var)" : ""} ·{" "}
                           {c.loan.data.years}y
                         </p>
                       </div>

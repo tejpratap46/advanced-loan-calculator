@@ -18,6 +18,7 @@ export const generateCSV = (
   const headers = [
     "Month",
     "Date",
+    "Rate (%)",
     "Status",
     "Disbursement",
     "EMI",
@@ -43,6 +44,7 @@ export const generateCSV = (
     return [
       r.m,
       r.date,
+      r.rate !== undefined ? `${r.rate}%` : "",
       status,
       r.disbAmt || "",
       r.emi ? Math.round(r.emi) : "",
@@ -61,6 +63,7 @@ export const generateCSV = (
     "TOTALS",
     "",
     "",
+    "",
     Math.round(totals.d),
     Math.round(totals.e),
     "",
@@ -76,17 +79,17 @@ export const generateCSV = (
   let csvRows = [headers, ...rows, totalRow];
 
   if (miscExpenses.length > 0) {
-    const miscHeaderRow = ["", "", "", "", "", "", "", "", "", "", "", "", ""];
-    const miscTitleRow = ["MISC EXPENSES & CHARGES", "", "", "", "", "", "", "", "", "", "", "", ""];
-    const miscSubHeaders = ["Date", "Amount", "Comments", "", "", "", "", "", "", "", "", "", ""];
+    const miscHeaderRow = ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+    const miscTitleRow = ["MISC EXPENSES & CHARGES", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+    const miscSubHeaders = ["Date", "Amount", "Comments", "", "", "", "", "", "", "", "", "", "", ""];
     const miscDataRows = miscExpenses.map((e) => [
       e.date,
       e.amount,
       e.comments,
-      "", "", "", "", "", "", "", "", "", "",
+      "", "", "", "", "", "", "", "", "", "", "",
     ]);
     const totalMiscAmount = miscExpenses.reduce((sum, item) => sum + item.amount, 0);
-    const miscTotalRow = ["TOTAL MISC CHARGES", totalMiscAmount, "", "", "", "", "", "", "", "", "", "", ""];
+    const miscTotalRow = ["TOTAL MISC CHARGES", totalMiscAmount, "", "", "", "", "", "", "", "", "", "", "", ""];
 
     csvRows = [
       ...csvRows,
@@ -110,6 +113,7 @@ export const generateDailyCSV = (schedule: ScheduleRow[]) => {
     "Month",
     "Day",
     "Date",
+    "Rate (%)",
     "Events",
     "Disbursement",
     "EMI Payment",
@@ -130,6 +134,7 @@ export const generateDailyCSV = (schedule: ScheduleRow[]) => {
         row.m,
         d.day,
         d.date,
+        d.rate !== undefined ? `${d.rate}%` : "",
         (d.events || []).join("; "),
         d.disbAmt || "",
         d.emiAmt ? Math.round(d.emiAmt) : "",

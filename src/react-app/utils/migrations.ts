@@ -1,4 +1,4 @@
-import type { Loan, Dispersal, LumpSum, CustomEmi } from "../types/index.ts";
+import type { Loan, Dispersal, LumpSum, CustomEmi, CustomRate } from "../types/index.ts";
 
 export const migrateLoans = (loans: Loan[]): Loan[] => {
   if (!Array.isArray(loans)) return [];
@@ -73,6 +73,20 @@ export const migrateLoans = (loans: Loan[]): Loan[] => {
       });
     }
 
+    let migratedCustomRates = data.customRates || [];
+    if (migratedCustomRates.length > 0) {
+      migratedCustomRates = (migratedCustomRates as unknown[]).map((r, idx) => {
+        const item = r as { id?: string; fromMonth: number; day?: number; rate: number };
+        const resolvedDay = Math.min(31, Math.max(1, item.day ?? (item.fromMonth === 1 ? defaultStartDay : 1)));
+        return {
+          id: item.id || `rate-${item.fromMonth}-${resolvedDay}-${idx}`,
+          fromMonth: item.fromMonth,
+          day: resolvedDay,
+          rate: Number(item.rate) || 0,
+        } as CustomRate;
+      });
+    }
+
     return {
       ...loan,
       data: {
@@ -83,6 +97,7 @@ export const migrateLoans = (loans: Loan[]): Loan[] => {
         dispersals: migratedDispersals,
         lumpSums: migratedLumpSums,
         customEmis: migratedCustomEmis,
+        customRates: migratedCustomRates,
         baselineOd: data.baselineOd ?? 0,
         customOds: data.customOds || [],
         miscExpenses: data.miscExpenses || [],

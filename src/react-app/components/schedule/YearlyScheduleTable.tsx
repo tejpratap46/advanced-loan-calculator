@@ -286,6 +286,7 @@ export function YearlyScheduleTable({
                                 <tr className={isDark ? "bg-slate-900/80" : "bg-white"}>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Mo</th>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Date</th>
+                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Rate</th>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Disb</th>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>EMI</th>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Principal</th>
@@ -336,6 +337,9 @@ export function YearlyScheduleTable({
                                           </div>
                                         </td>
                                         <td className={`px-2 py-1.5 ${subtext}`}>{r.date}</td>
+                                        <td className="px-2 py-1.5 text-indigo-400 font-mono text-[11px]">
+                                          {r.rate !== undefined ? `${r.rate}%` : "—"}
+                                        </td>
                                         <td className="px-2 py-1.5 text-sky-400 font-mono">
                                           {r.disbAmt > 0 ? fmt(r.disbAmt) : "—"}
                                         </td>
@@ -364,7 +368,7 @@ export function YearlyScheduleTable({
                                       {/* Day-Wise Breakdown if expanded */}
                                       {isMonthExpanded && (
                                         <tr>
-                                          <td colSpan={hasOd ? 9 : 8} className="p-0">
+                                          <td colSpan={hasOd ? 10 : 9} className="p-0">
                                             {renderDailyBreakdown(r)}
                                           </td>
                                         </tr>

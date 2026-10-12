@@ -176,7 +176,10 @@ export function LoanToolbar({
           title="Annual Interest Rate"
         >
           <Percent size={12} className="text-indigo-400" />
-          <span className="font-bold">{rate.toFixed(2)}% p.a.</span>
+          <span className="font-bold">
+            {rate.toFixed(2)}% p.a.
+            {activeLoan?.data.customRates && activeLoan.data.customRates.length > 0 ? " (Var)" : ""}
+          </span>
         </div>
 
         <div

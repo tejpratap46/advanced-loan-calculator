@@ -19,6 +19,13 @@ export interface LumpSum {
   amount: number;
 }
 
+export interface CustomRate {
+  id?: string;
+  fromMonth: number;
+  day?: number;
+  rate: number;
+}
+
 export interface MiscExpense {
   id: string;
   date: string;
@@ -34,6 +41,7 @@ export interface LoanData {
   dispersals: Dispersal[];
   customEmis: CustomEmi[];
   lumpSums: LumpSum[];
+  customRates?: CustomRate[];
   baselineOd?: number;
   customOds?: { fromMonth: number; amount: number }[];
   miscExpenses?: MiscExpense[];
@@ -49,6 +57,7 @@ export interface DayDetail {
   day: number;
   date: string;
   fullDate: string;
+  rate?: number;
   disbAmt: number;
   emiAmt: number;
   lumpAmt: number;
@@ -64,6 +73,7 @@ export interface DayDetail {
 export interface ScheduleRow {
   m: number;
   date: string;
+  rate?: number;
   disbAmt: number;
   emi: number;
   prinPay: number;

@@ -3,13 +3,14 @@ import {
   Wallet,
   Percent,
   PiggyBank,
+  TrendingUp,
   DollarSign,
   Receipt,
   X,
   LayoutGrid,
   Columns,
 } from "lucide-react";
-import type { LoanData, Dispersal, CustomEmi, LumpSum, MiscExpense } from "../../types";
+import type { LoanData, Dispersal, CustomEmi, LumpSum, CustomRate, MiscExpense } from "../../types";
 import { NumInput } from "../ui/NumInput";
 import { StrInput } from "../ui/StrInput";
 import { ActionBtn } from "../ui/ActionBtn";
@@ -22,9 +23,17 @@ interface AdvancedStrategiesProps {
   locale?: string;
   isDark: boolean;
   getResolvedDate: (monthNum: number, dayNum: number) => string;
+  externalActiveTab?: StrategyTab;
+  onActiveTabChange?: (tab: StrategyTab) => void;
 }
 
-type StrategyTab = "dispersals" | "customEmis" | "lumpSums" | "overdraft" | "misc";
+export type StrategyTab =
+  | "dispersals"
+  | "customEmis"
+  | "lumpSums"
+  | "rates"
+  | "overdraft"
+  | "misc";
 
 export function AdvancedStrategies({
   data,
@@ -33,9 +42,18 @@ export function AdvancedStrategies({
   locale = "en-US",
   isDark,
   getResolvedDate,
+  externalActiveTab,
+  onActiveTabChange,
 }: AdvancedStrategiesProps) {
-  const [activeTab, setActiveTab] = useState<StrategyTab>("dispersals");
+  const [internalActiveTab, setInternalActiveTab] = useState<StrategyTab>("dispersals");
   const [layoutMode, setLayoutMode] = useState<"workbench" | "grid">("workbench");
+
+  const activeTab = externalActiveTab ?? internalActiveTab;
+
+  const setActiveTab = (tab: StrategyTab) => {
+    setInternalActiveTab(tab);
+    if (onActiveTabChange) onActiveTabChange(tab);
+  };
 
   const fmt = (v: number) =>
     new Intl.NumberFormat(locale, {
@@ -69,6 +87,14 @@ export function AdvancedStrategies({
     amount: string;
     originalId?: string;
   }>({ month: 0, day: 1, amount: "" });
+
+  const [newRate, setNewRate] = useState<{
+    id?: string;
+    fromMonth: number;
+    day: number;
+    rate: string;
+    originalId?: string;
+  }>({ fromMonth: 1, day: 1, rate: "" });
 
   const [newOd, setNewOd] = useState<{
     fromMonth: number;
@@ -195,6 +221,41 @@ export function AdvancedStrategies({
     setNewLump({ month: 0, day: 1, amount: "" });
   };
 
+  const addRate = () => {
+    const r = parseFloat(newRate.rate);
+    if (isNaN(r) || r <= 0 || newRate.fromMonth < 1) return;
+    const day = Math.min(31, Math.max(1, newRate.day || 1));
+    const current = data.customRates || [];
+    let updated: CustomRate[];
+    if (newRate.originalId) {
+      updated = current.map((item) =>
+        (item.id && item.id === newRate.originalId) ||
+        (!item.id && `${item.fromMonth}-${item.day || 1}` === newRate.originalId)
+          ? {
+              id: item.id || newRate.originalId,
+              fromMonth: newRate.fromMonth,
+              day,
+              rate: r,
+            }
+          : item,
+      );
+    } else {
+      const newItem: CustomRate = {
+        id: `rate-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        fromMonth: newRate.fromMonth,
+        day,
+        rate: r,
+      };
+      updated = [...current, newItem];
+    }
+    updateData({
+      customRates: updated.sort(
+        (a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1),
+      ),
+    });
+    setNewRate({ fromMonth: 1, day: 1, rate: "" });
+  };
+
   const addOd = () => {
     const a = parseFloat(newOd.amount);
     if (isNaN(a) || a < 0) return;
@@ -292,6 +353,20 @@ export function AdvancedStrategies({
       activeTabStyle: isDark
         ? "bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-xs"
         : "bg-amber-50 text-amber-800 border-amber-300 shadow-xs",
+    },
+    {
+      id: "rates" as StrategyTab,
+      label: "Interest Rates",
+      shortLabel: "Rates",
+      icon: <TrendingUp size={14} />,
+      count: data.customRates?.length || 0,
+      accentColor: "indigo",
+      badgeClass: isDark
+        ? "bg-indigo-500/10 text-indigo-300 border-indigo-500/20"
+        : "bg-indigo-50 text-indigo-700 border-indigo-200",
+      activeTabStyle: isDark
+        ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-xs"
+        : "bg-indigo-50 text-indigo-800 border-indigo-300 shadow-xs",
     },
     {
       id: "overdraft" as StrategyTab,
@@ -801,7 +876,149 @@ export function AdvancedStrategies({
               </div>
             )}
 
-            {/* 4. OVERDRAFT / OFFSET TAB */}
+            {/* 4. INTEREST RATES TAB */}
+            {activeTab === "rates" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <div className="lg:col-span-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                      Interest Rate Schedule ({(data.customRates?.length || 0) + 1})
+                    </span>
+                    <span className="text-xs font-mono font-bold text-indigo-400">
+                      Initial: {data.rate}% p.a.
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {/* Baseline / Initial rate badge */}
+                    <span
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                        isDark
+                          ? "bg-slate-800/80 text-slate-300 border-slate-700/80"
+                          : "bg-slate-100 text-slate-700 border-slate-200"
+                      }`}
+                      title="Initial loan interest rate from first payment date"
+                    >
+                      <span>M1 · D1: {data.rate}% p.a. (Initial)</span>
+                    </span>
+
+                    {/* Configured custom rate revisions */}
+                    {(data.customRates || [])
+                      .slice()
+                      .sort((a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1))
+                      .map((r) => (
+                        <span
+                          key={r.id || `${r.fromMonth}-${r.day}`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                            isDark
+                              ? "bg-indigo-500/10 text-indigo-300 border-indigo-500/20"
+                              : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                          }`}
+                        >
+                          <span
+                            className="cursor-pointer hover:underline"
+                            onClick={() => {
+                              setNewRate({
+                                id: r.id,
+                                fromMonth: r.fromMonth,
+                                day: r.day || 1,
+                                rate: r.rate.toString(),
+                                originalId: r.id || `${r.fromMonth}-${r.day || 1}`,
+                              });
+                            }}
+                            title="Click to edit rate change"
+                          >
+                            From M{r.fromMonth} · D{r.day || 1}: {r.rate}% p.a.
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateData({
+                                customRates: (data.customRates || []).filter((x) =>
+                                  r.id
+                                    ? x.id !== r.id
+                                    : x.fromMonth !== r.fromMonth ||
+                                      (x.day || 1) !== (r.day || 1),
+                                ),
+                              })
+                            }
+                            className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                            title="Remove rate revision"
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ))}
+
+                    {(!data.customRates || data.customRates.length === 0) && (
+                      <span className={`text-xs italic ${subtext}`}>
+                        Fixed {data.rate}% p.a. applies for entire loan. Add variable rate changes below.
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  className={`lg:col-span-7 p-3.5 rounded-xl border ${
+                    isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-semibold ${subtext}`}>
+                      {newRate.originalId ? "Edit Rate Revision" : "Add Variable Rate Revision"}
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-lg font-mono border ${
+                        isDark
+                          ? "bg-indigo-500/10 text-indigo-300 border-indigo-500/20"
+                          : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                      }`}
+                    >
+                      📅 {getResolvedDate(newRate.fromMonth, newRate.day)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <NumInput
+                      placeholder="From Month"
+                      value={newRate.fromMonth}
+                      onChange={(v) => setNewRate({ ...newRate, fromMonth: v })}
+                      onEnter={addRate}
+                      isDark={isDark}
+                      min={1}
+                      max={data.years * 12}
+                    />
+                    <NumInput
+                      placeholder="Day (1-31)"
+                      value={newRate.day}
+                      onChange={(v) =>
+                        setNewRate({ ...newRate, day: Math.min(31, Math.max(1, v)) })
+                      }
+                      onEnter={addRate}
+                      isDark={isDark}
+                      min={1}
+                      max={31}
+                    />
+                    <StrInput
+                      placeholder="New Rate (%)"
+                      value={newRate.rate}
+                      onChange={(v) => setNewRate({ ...newRate, rate: v })}
+                      onEnter={addRate}
+                      isDark={isDark}
+                    />
+                    <ActionBtn onClick={addRate} color="indigo" isDark={isDark}>
+                      {newRate.originalId ? "Save" : "Add Rate Revision"}
+                    </ActionBtn>
+                    {newRate.originalId && (
+                      <CancelBtn
+                        onClick={() => setNewRate({ fromMonth: 1, day: 1, rate: "" })}
+                        isDark={isDark}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 5. OVERDRAFT / OFFSET TAB */}
             {activeTab === "overdraft" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
                 <div className="lg:col-span-5 space-y-2.5">
@@ -1220,7 +1437,77 @@ export function AdvancedStrategies({
             </button>
           </div>
 
-          {/* Card 4: Overdraft / Offset */}
+          {/* Card 4: Interest Rates */}
+          <div
+            className={`p-4 rounded-2xl border flex flex-col justify-between ${
+              isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5">
+                <div className="flex items-center gap-1.5">
+                  <TrendingUp size={14} className="text-indigo-400" />
+                  <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                    Interest Rates
+                  </span>
+                </div>
+                <span className="text-xs font-bold font-mono text-indigo-400">
+                  {data.customRates && data.customRates.length > 0
+                    ? `${data.customRates.length} updates`
+                    : `${data.rate}% fixed`}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-3 min-h-[42px]">
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                    isDark ? "bg-slate-800 text-slate-300 border-slate-700" : "bg-slate-100 text-slate-700 border-slate-200"
+                  }`}
+                  title="Initial rate from start of loan"
+                >
+                  <span>M1: {data.rate}%</span>
+                </span>
+                {(data.customRates || []).map((r) => (
+                  <span
+                    key={r.id || `${r.fromMonth}-${r.day}`}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isDark ? "bg-indigo-500/10 text-indigo-300 border-indigo-500/20" : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                    }`}
+                  >
+                    <span>M{r.fromMonth}: {r.rate}%</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateData({
+                          customRates: (data.customRates || []).filter((x) =>
+                            r.id
+                              ? x.id !== r.id
+                              : x.fromMonth !== r.fromMonth ||
+                                (x.day || 1) !== (r.day || 1),
+                          ),
+                        })
+                      }
+                      className="hover:opacity-70 cursor-pointer"
+                      title="Remove"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("rates");
+                setLayoutMode("workbench");
+              }}
+              className="w-full py-1.5 rounded-xl text-xs font-semibold text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all cursor-pointer"
+            >
+              + Configure Rates
+            </button>
+          </div>
+
+          {/* Card 5: Overdraft / Offset */}
           <div
             className={`p-4 rounded-2xl border flex flex-col justify-between ${
               isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"
@@ -1272,7 +1559,7 @@ export function AdvancedStrategies({
             </button>
           </div>
 
-          {/* Card 5: Fees & Charges */}
+          {/* Card 6: Fees & Charges */}
           <div
             className={`p-4 rounded-2xl border flex flex-col justify-between ${
               isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"

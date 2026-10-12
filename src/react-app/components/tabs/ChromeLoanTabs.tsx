@@ -282,6 +282,7 @@ export function ChromeLoanTabs({
                         }`}
                       >
                         {compactPrincipal} · {loan.data.rate}%
+                        {loan.data.customRates && loan.data.customRates.length > 0 ? " (Var)" : ""}
                       </span>
                     </div>
                   )}
