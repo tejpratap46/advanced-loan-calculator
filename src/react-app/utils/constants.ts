@@ -3,6 +3,7 @@ import type { LoanData } from "../types/index.ts";
 export const STORAGE_KEY = "loan-calc-loans";
 export const THEME_KEY = "loan-calc-theme";
 export const FIREBASE_CONFIG_KEY = "loan-calc-firebase-config";
+export const TABLE_COLUMNS_KEY = "loan-calc-table-columns";
 
 const today = new Date().toISOString().split("T")[0];
 const todayParts = today.split("-").map(Number);

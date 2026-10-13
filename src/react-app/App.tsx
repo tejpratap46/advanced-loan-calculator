@@ -36,8 +36,15 @@ import {
   STORAGE_KEY,
   THEME_KEY,
   FIREBASE_CONFIG_KEY,
+  TABLE_COLUMNS_KEY,
   DEFAULT_DATA,
 } from "./utils/constants";
+import {
+  type TableColumnId,
+  ALL_TABLE_COLUMNS,
+  DEFAULT_VISIBLE_COLUMNS,
+  CUSTOM_ONLY_COLUMNS,
+} from "./components/schedule/tableColumns";
 
 // Utilities
 import { getUserCurrency, getCurrencySymbol } from "./utils/currency";
@@ -100,6 +107,49 @@ export default function LoanCalculator() {
   // View & Filter states for Schedule
   const [scheduleViewMode, setScheduleViewMode] = useState<ViewMode>("monthly");
   const [scheduleFilterMode, setScheduleFilterMode] = useState<FilterMode>("all");
+
+  // Table Columns Visibility State (saved in localStorage, defaults to all columns)
+  const [visibleColumns, setVisibleColumns] = useState<TableColumnId[]>(() => {
+    try {
+      const saved = localStorage.getItem(TABLE_COLUMNS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const valid = parsed.filter((id: string) =>
+            ALL_TABLE_COLUMNS.some((col) => col.id === id),
+          );
+          if (valid.length > 0) return valid as TableColumnId[];
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load table columns from localStorage:", e);
+    }
+    return DEFAULT_VISIBLE_COLUMNS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TABLE_COLUMNS_KEY, JSON.stringify(visibleColumns));
+    } catch (e) {
+      console.error("Failed to save table columns to localStorage:", e);
+    }
+  }, [visibleColumns]);
+
+  const toggleColumn = (id: TableColumnId) => {
+    setVisibleColumns((prev) => {
+      if (prev.includes(id)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((c) => c !== id);
+      } else {
+        const next = [...prev, id];
+        return ALL_TABLE_COLUMNS.map((c) => c.id).filter((cId) => next.includes(cId));
+      }
+    });
+  };
+
+  const selectAllColumns = () => setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
+  const selectCustomColumnsOnly = () => setVisibleColumns(CUSTOM_ONLY_COLUMNS);
+  const resetColumns = () => setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
 
   const [expandedMonths, setExpandedMonths] = useState<Record<number, boolean>>({});
   const [strategyTab, setStrategyTab] = useState<StrategyTab>("dispersals");
@@ -673,6 +723,28 @@ export default function LoanCalculator() {
     }
     return schedule;
   }, [schedule, scheduleFilterMode, cm]);
+
+  // Visible column headers for Monthly view table
+  const visibleMonthlyHeaders = useMemo(() => {
+    const allMonthly = [
+      { id: "m" as TableColumnId, label: "Mo" },
+      { id: "date" as TableColumnId, label: "Date" },
+      { id: "rate" as TableColumnId, label: "Rate" },
+      { id: "status" as TableColumnId, label: "Status" },
+      { id: "disbAmt" as TableColumnId, label: "Disbursement" },
+      ...(hasDirectPayments ? [{ id: "directPayAmt" as TableColumnId, label: "Direct Pay" }] : []),
+      { id: "emi" as TableColumnId, label: "Monthly EMI" },
+      { id: "stdEmi" as TableColumnId, label: "Std EMI" },
+      { id: "customEmiAmt" as TableColumnId, label: "Custom EMI" },
+      { id: "lumpAmt" as TableColumnId, label: "Lump Sum" },
+      { id: "prinPay" as TableColumnId, label: "Principal Paid" },
+      { id: "intPay" as TableColumnId, label: "Interest Paid" },
+      { id: "interestSaved" as TableColumnId, label: "Interest Saved" },
+      ...(hasOd ? [{ id: "odBal" as TableColumnId, label: "OD Balance" }] : []),
+      { id: "remaining" as TableColumnId, label: "Closing Balance" },
+    ];
+    return allMonthly.filter((col) => visibleColumns.includes(col.id));
+  }, [visibleColumns, hasDirectPayments, hasOd]);
 
   /* ── Dribbble Glass & Surface Styling Tokens ───────────────────────────── */
   const card = isDark
@@ -1618,6 +1690,13 @@ export default function LoanCalculator() {
             onExportMonthlyCSV={downloadCSV}
             totalPaymentsCount={schedule.filter((r) => r.emi > 0).length}
             isDark={isDark}
+            visibleColumns={visibleColumns}
+            onToggleColumn={toggleColumn}
+            onSelectAllColumns={selectAllColumns}
+            onSelectCustomColumnsOnly={selectCustomColumnsOnly}
+            onResetColumns={resetColumns}
+            hasDirectPayments={hasDirectPayments}
+            hasOd={hasOd}
           />
 
           {/* Conditional Rendering: Yearly View vs Monthly View */}
@@ -1634,6 +1713,7 @@ export default function LoanCalculator() {
                 expandedMonths={expandedMonths}
                 toggleMonth={toggleMonth}
                 renderDailyBreakdown={renderDailyBreakdown}
+                visibleColumns={visibleColumns}
               />
             </div>
           ) : (
@@ -1645,28 +1725,12 @@ export default function LoanCalculator() {
                       isDark ? "bg-slate-900/40" : "bg-slate-50/80"
                     }`}
                   >
-                    {[
-                      "Mo",
-                      "Date",
-                      "Rate",
-                      "Status",
-                      "Disbursement",
-                      ...(hasDirectPayments ? ["Direct Pay"] : []),
-                      "Monthly EMI",
-                      "Std EMI",
-                      "Custom EMI",
-                      "Lump Sum",
-                      "Principal Paid",
-                      "Interest Paid",
-                      "Interest Saved",
-                      ...(hasOd ? ["OD Balance"] : []),
-                      "Closing Balance",
-                    ].map((h) => (
+                    {visibleMonthlyHeaders.map((h) => (
                       <th
-                        key={h}
+                        key={h.id}
                         className={`px-3 py-2.5 text-left font-semibold uppercase tracking-wider text-[10px] ${subtext} whitespace-nowrap`}
                       >
-                        {h}
+                        {h.label}
                       </th>
                     ))}
                   </tr>
@@ -1698,136 +1762,168 @@ export default function LoanCalculator() {
                               : "hover:bg-slate-100/60"
                           }`}
                         >
-                          <td className={`px-3 py-2.5 font-bold ${heading} whitespace-nowrap`}>
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => toggleMonth(r.m)}
-                                className={`p-1 rounded-md transition-colors cursor-pointer ${
-                                  isDark ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-200 text-slate-600"
-                                }`}
-                                title={
-                                  isExpanded
-                                    ? "Collapse day-wise details"
-                                    : "Expand day-wise details"
-                                }
-                              >
-                                {isExpanded ? (
-                                  <ChevronDown size={14} className="text-sky-400" />
-                                ) : (
-                                  <ChevronRight size={14} className="opacity-60 hover:opacity-100" />
-                                )}
-                              </button>
-                              <span>M{r.m}</span>
-                              {isCur && (
-                                <span className="ml-1 px-1.5 py-0.2 bg-sky-500 text-white rounded-full text-[8px] font-bold tracking-wide">
-                                  NOW
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          <td className={`px-3 py-2.5 ${subtext} whitespace-nowrap font-medium`}>
-                            {r.date}
-                          </td>
-
-                          <td className="px-3 py-2.5 font-mono text-xs text-indigo-400 whitespace-nowrap font-medium">
-                            {r.rate !== undefined ? `${r.rate}%` : "—"}
-                          </td>
-
-                          <td className="px-3 py-2.5 whitespace-nowrap">
-                            {r.emi > 0 ? (
-                              isPaid ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                  ✓ Paid
-                                </span>
-                              ) : isCur ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                                  Current
-                                </span>
-                              ) : (
-                                <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                    isDark
-                                      ? "bg-slate-800/60 text-slate-400 border border-slate-700"
-                                      : "bg-slate-100 text-slate-500 border border-slate-200"
+                          {visibleColumns.includes("m") && (
+                            <td className={`px-3 py-2.5 font-bold ${heading} whitespace-nowrap`}>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleMonth(r.m)}
+                                  className={`p-1 rounded-md transition-colors cursor-pointer ${
+                                    isDark ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-200 text-slate-600"
                                   }`}
+                                  title={
+                                    isExpanded
+                                      ? "Collapse day-wise details"
+                                      : "Expand day-wise details"
+                                  }
                                 >
-                                  Pending
-                                </span>
-                              )
-                            ) : (
-                              <span className={subtext}>—</span>
-                            )}
-                          </td>
+                                  {isExpanded ? (
+                                    <ChevronDown size={14} className="text-sky-400" />
+                                  ) : (
+                                    <ChevronRight size={14} className="opacity-60 hover:opacity-100" />
+                                  )}
+                                </button>
+                                <span>M{r.m}</span>
+                                {isCur && (
+                                  <span className="ml-1 px-1.5 py-0.2 bg-sky-500 text-white rounded-full text-[8px] font-bold tracking-wide">
+                                    NOW
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          )}
 
-                          <td className="px-3 py-2.5 text-sky-400 font-mono font-medium">
-                            {r.disbAmt > 0 ? fmt(r.disbAmt) : <span className={subtext}>—</span>}
-                          </td>
+                          {visibleColumns.includes("date") && (
+                            <td className={`px-3 py-2.5 ${subtext} whitespace-nowrap font-medium`}>
+                              {r.date}
+                            </td>
+                          )}
 
-                          {hasDirectPayments && (
+                          {visibleColumns.includes("rate") && (
+                            <td className="px-3 py-2.5 font-mono text-xs text-indigo-400 whitespace-nowrap font-medium">
+                              {r.rate !== undefined ? `${r.rate}%` : "—"}
+                            </td>
+                          )}
+
+                          {visibleColumns.includes("status") && (
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              {r.emi > 0 ? (
+                                isPaid ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    ✓ Paid
+                                  </span>
+                                ) : isCur ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                                    Current
+                                  </span>
+                                ) : (
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                      isDark
+                                        ? "bg-slate-800/60 text-slate-400 border border-slate-700"
+                                        : "bg-slate-100 text-slate-500 border border-slate-200"
+                                    }`}
+                                  >
+                                    Pending
+                                  </span>
+                                )
+                              ) : (
+                                <span className={subtext}>—</span>
+                              )}
+                            </td>
+                          )}
+
+                          {visibleColumns.includes("disbAmt") && (
+                            <td className="px-3 py-2.5 text-sky-400 font-mono font-medium">
+                              {r.disbAmt > 0 ? fmt(r.disbAmt) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
+
+                          {hasDirectPayments && visibleColumns.includes("directPayAmt") && (
                             <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
                               {(r.directPayAmt || 0) > 0 ? fmt(r.directPayAmt!) : <span className={subtext}>—</span>}
                             </td>
                           )}
 
-                          <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
-                            {r.emi > 0 ? fmt(r.emi) : <span className={subtext}>—</span>}
-                          </td>
+                          {visibleColumns.includes("emi") && (
+                            <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
+                              {r.emi > 0 ? fmt(r.emi) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
 
-                          <td className={`px-3 py-2.5 font-mono ${subtext}`}>
-                            {r.stdEmi > 0 ? fmt(r.stdEmi) : <span className={subtext}>—</span>}
-                          </td>
+                          {visibleColumns.includes("stdEmi") && (
+                            <td className={`px-3 py-2.5 font-mono ${subtext}`}>
+                              {r.stdEmi > 0 ? fmt(r.stdEmi) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
 
-                          <td className="px-3 py-2.5 text-violet-400 font-mono font-medium">
-                            {r.customEmiAmt ? (
-                              <div className="flex flex-col">
-                                <span>{fmt(r.customEmiAmt)}</span>
-                                {r.customEmiType === "interest_only" && (
-                                  <span className="text-[9px] text-violet-400/80 font-sans font-normal">
-                                    Interest Only
-                                  </span>
-                                )}
-                                {r.customEmiType === "recalculated" && (
-                                  <span className="text-[9px] text-violet-400/80 font-sans font-normal">
-                                    Recalculated
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className={subtext}>—</span>
-                            )}
-                          </td>
+                          {visibleColumns.includes("customEmiAmt") && (
+                            <td className="px-3 py-2.5 text-violet-400 font-mono font-medium">
+                              {r.customEmiAmt ? (
+                                <div className="flex flex-col">
+                                  <span>{fmt(r.customEmiAmt)}</span>
+                                  {r.customEmiType === "interest_only" && (
+                                    <span className="text-[9px] text-violet-400/80 font-sans font-normal">
+                                      Interest Only
+                                    </span>
+                                  )}
+                                  {r.customEmiType === "recalculated" && (
+                                    <span className="text-[9px] text-violet-400/80 font-sans font-normal">
+                                      Recalculated
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className={subtext}>—</span>
+                              )}
+                            </td>
+                          )}
 
-                          <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
-                            {r.lumpAmt ? fmt(r.lumpAmt) : <span className={subtext}>—</span>}
-                          </td>
+                          {visibleColumns.includes("lumpAmt") && (
+                            <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
+                              {r.lumpAmt ? fmt(r.lumpAmt) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
 
-                          <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
-                            {r.prinPay > 0 ? fmt(r.prinPay) : <span className={subtext}>—</span>}
-                          </td>
+                          {visibleColumns.includes("prinPay") && (
+                            <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
+                              {r.prinPay > 0 ? fmt(r.prinPay) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
 
-                          <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
-                            {r.intPay > 0 ? fmt(r.intPay) : <span className={subtext}>—</span>}
-                          </td>
+                          {visibleColumns.includes("intPay") && (
+                            <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
+                              {r.intPay > 0 ? fmt(r.intPay) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
 
-                          <td className="px-3 py-2.5 text-emerald-400 font-mono font-bold">
-                            {r.interestSaved > 0 ? fmt(r.interestSaved) : <span className={subtext}>—</span>}
-                          </td>
+                          {visibleColumns.includes("interestSaved") && (
+                            <td className="px-3 py-2.5 text-emerald-400 font-mono font-bold">
+                              {r.interestSaved > 0 ? fmt(r.interestSaved) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
 
-                          {hasOd && (
+                          {hasOd && visibleColumns.includes("odBal") && (
                             <td className="px-3 py-2.5 text-emerald-400 font-mono">
                               {r.odBal > 0 ? fmt(r.odBal) : <span className={subtext}>—</span>}
                             </td>
                           )}
 
-                          <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
-                            {fmt(r.remaining)}
-                          </td>
+                          {visibleColumns.includes("remaining") && (
+                            <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
+                              {fmt(r.remaining)}
+                            </td>
+                          )}
                         </tr>
 
                         {/* Day-Wise Granular Breakdown Sub-Table */}
-                        {isExpanded && renderDailyBreakdown(r)}
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={visibleMonthlyHeaders.length} className="p-0">
+                              {renderDailyBreakdown(r)}
+                            </td>
+                          </tr>
+                        )}
                       </Fragment>
                     );
                   })}

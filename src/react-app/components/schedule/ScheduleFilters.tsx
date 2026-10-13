@@ -1,4 +1,6 @@
 import { Download } from "lucide-react";
+import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
+import type { TableColumnId } from "./tableColumns";
 
 export type ViewMode = "monthly" | "yearly";
 export type FilterMode = "all" | "prepayments" | "pending";
@@ -14,6 +16,13 @@ interface ScheduleFiltersProps {
   onExportMonthlyCSV: () => void;
   totalPaymentsCount: number;
   isDark: boolean;
+  visibleColumns: TableColumnId[];
+  onToggleColumn: (id: TableColumnId) => void;
+  onSelectAllColumns: () => void;
+  onSelectCustomColumnsOnly: () => void;
+  onResetColumns: () => void;
+  hasDirectPayments?: boolean;
+  hasOd?: boolean;
 }
 
 export function ScheduleFilters({
@@ -27,6 +36,13 @@ export function ScheduleFilters({
   onExportMonthlyCSV,
   totalPaymentsCount,
   isDark,
+  visibleColumns,
+  onToggleColumn,
+  onSelectAllColumns,
+  onSelectCustomColumnsOnly,
+  onResetColumns,
+  hasDirectPayments,
+  hasOd,
 }: ScheduleFiltersProps) {
   const subtext = isDark ? "text-slate-400" : "text-slate-500";
 
@@ -147,6 +163,18 @@ export function ScheduleFilters({
             {allExpanded ? "Collapse Days" : "Expand Days"}
           </button>
         )}
+
+        {/* Column Visibility Selector Menu */}
+        <ColumnVisibilityMenu
+          visibleColumns={visibleColumns}
+          onToggleColumn={onToggleColumn}
+          onSelectAll={onSelectAllColumns}
+          onSelectCustomOnly={onSelectCustomColumnsOnly}
+          onReset={onResetColumns}
+          isDark={isDark}
+          hasDirectPayments={hasDirectPayments}
+          hasOd={hasOd}
+        />
 
         {/* CSV Export Dropdown / Buttons */}
         <div className="flex items-center gap-1.5">

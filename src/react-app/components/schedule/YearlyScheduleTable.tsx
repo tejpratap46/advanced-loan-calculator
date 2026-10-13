@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ScheduleRow } from "../../types";
+import type { TableColumnId } from "./tableColumns";
 
 interface YearlyScheduleTableProps {
   schedule: ScheduleRow[];
@@ -13,6 +14,7 @@ interface YearlyScheduleTableProps {
   expandedMonths: Record<number, boolean>;
   toggleMonth: (m: number) => void;
   renderDailyBreakdown: (r: ScheduleRow) => React.ReactNode;
+  visibleColumns?: TableColumnId[];
 }
 
 export function YearlyScheduleTable({
@@ -26,6 +28,7 @@ export function YearlyScheduleTable({
   expandedMonths,
   toggleMonth,
   renderDailyBreakdown,
+  visibleColumns,
 }: YearlyScheduleTableProps) {
   const [expandedYears, setExpandedYears] = useState<Record<number, boolean>>({});
 
@@ -126,6 +129,45 @@ export function YearlyScheduleTable({
   const subtext = isDark ? "text-slate-400" : "text-slate-500";
   const heading = isDark ? "text-white" : "text-slate-900";
 
+  const isColVisible = (id: TableColumnId) => {
+    if (!visibleColumns) return true;
+    return visibleColumns.includes(id);
+  };
+
+  const yearlyHeaders = useMemo(() => {
+    const all = [
+      { id: "m" as TableColumnId, label: "Year / Period" },
+      { id: "status" as TableColumnId, label: "Status" },
+      { id: "disbAmt" as TableColumnId, label: "Annual Disb" },
+      ...(hasDirectPay ? [{ id: "directPayAmt" as TableColumnId, label: "Annual Direct Pay" }] : []),
+      { id: "emi" as TableColumnId, label: "Annual EMI" },
+      { id: "prinPay" as TableColumnId, label: "Annual Principal" },
+      { id: "intPay" as TableColumnId, label: "Annual Interest" },
+      { id: "interestSaved" as TableColumnId, label: "Interest Saved" },
+      { id: "remaining" as TableColumnId, label: "Year-End Balance" },
+    ];
+    if (!visibleColumns) return all;
+    return all.filter((col) => visibleColumns.includes(col.id));
+  }, [visibleColumns, hasDirectPay]);
+
+  const monthHeaders = useMemo(() => {
+    const all = [
+      { id: "m" as TableColumnId, label: "Mo" },
+      { id: "date" as TableColumnId, label: "Date" },
+      { id: "rate" as TableColumnId, label: "Rate" },
+      { id: "disbAmt" as TableColumnId, label: "Disb" },
+      ...(hasDirectPay ? [{ id: "directPayAmt" as TableColumnId, label: "Direct Pay" }] : []),
+      { id: "emi" as TableColumnId, label: "EMI" },
+      { id: "prinPay" as TableColumnId, label: "Principal" },
+      { id: "intPay" as TableColumnId, label: "Interest" },
+      { id: "interestSaved" as TableColumnId, label: "Saved" },
+      ...(hasOd ? [{ id: "odBal" as TableColumnId, label: "OD Bal" }] : []),
+      { id: "remaining" as TableColumnId, label: "Balance" },
+    ];
+    if (!visibleColumns) return all;
+    return all.filter((col) => visibleColumns.includes(col.id));
+  }, [visibleColumns, hasDirectPay, hasOd]);
+
   return (
     <div className="w-full">
       <div className="flex items-center justify-between pb-3 mb-2 border-b border-white/5">
@@ -155,22 +197,12 @@ export function YearlyScheduleTable({
                 isDark ? "bg-slate-900/40" : "bg-slate-50/80"
               }`}
             >
-              {[
-                "Year / Period",
-                "Status",
-                "Annual Disb",
-                ...(hasDirectPay ? ["Annual Direct Pay"] : []),
-                "Annual EMI",
-                "Annual Principal",
-                "Annual Interest",
-                "Interest Saved",
-                "Year-End Balance",
-              ].map((h) => (
+              {yearlyHeaders.map((h) => (
                 <th
-                  key={h}
+                  key={h.id}
                   className={`px-3 py-2.5 text-left font-semibold uppercase tracking-wider text-[10px] ${subtext} whitespace-nowrap`}
                 >
-                  {h}
+                  {h.label}
                 </th>
               ))}
             </tr>
@@ -196,93 +228,109 @@ export function YearlyScheduleTable({
                     }`}
                     onClick={() => toggleYear(y.yearNum)}
                   >
-                    <td className={`px-3 py-2.5 font-bold ${heading} whitespace-nowrap`}>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`p-1 rounded-md transition-colors ${
-                            isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600 shadow-xs"
-                          }`}
-                        >
-                          {isYearExpanded ? (
-                            <ChevronDown size={14} className="text-sky-400" />
-                          ) : (
-                            <ChevronRight size={14} />
-                          )}
-                        </span>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span>{y.label}</span>
-                            {y.isCurrent && (
-                              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-sky-500 text-white tracking-wide">
-                                CURRENT
-                              </span>
+                    {isColVisible("m") && (
+                      <td className={`px-3 py-2.5 font-bold ${heading} whitespace-nowrap`}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`p-1 rounded-md transition-colors ${
+                              isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600 shadow-xs"
+                            }`}
+                          >
+                            {isYearExpanded ? (
+                              <ChevronDown size={14} className="text-sky-400" />
+                            ) : (
+                              <ChevronRight size={14} />
                             )}
-                            {y.hasEvents && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Includes Prepayments or Adjustments" />
-                            )}
-                          </div>
-                          <span className={`text-[10px] font-normal ${subtext}`}>
-                            {firstMonthDate} – {lastMonthDate}
                           </span>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span>{y.label}</span>
+                              {y.isCurrent && (
+                                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-sky-500 text-white tracking-wide">
+                                  CURRENT
+                                </span>
+                              )}
+                              {y.hasEvents && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Includes Prepayments or Adjustments" />
+                              )}
+                            </div>
+                            <span className={`text-[10px] font-normal ${subtext}`}>
+                              {firstMonthDate} – {lastMonthDate}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    </td>
+                      </td>
+                    )}
 
-                    <td className="px-3 py-2.5 whitespace-nowrap">
-                      {y.isPaid ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          ✓ Completed
-                        </span>
-                      ) : y.isCurrent ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                          In Progress
-                        </span>
-                      ) : (
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          isDark
-                            ? "bg-slate-800/60 text-slate-400 border border-slate-700"
-                            : "bg-slate-100 text-slate-500 border border-slate-200"
-                        }`}>
-                          Upcoming
-                        </span>
-                      )}
-                    </td>
+                    {isColVisible("status") && (
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {y.isPaid ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            ✓ Completed
+                          </span>
+                        ) : y.isCurrent ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                            In Progress
+                          </span>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            isDark
+                              ? "bg-slate-800/60 text-slate-400 border border-slate-700"
+                              : "bg-slate-100 text-slate-500 border border-slate-200"
+                          }`}>
+                            Upcoming
+                          </span>
+                        )}
+                      </td>
+                    )}
 
-                    <td className="px-3 py-2.5 text-sky-400 font-mono font-medium">
-                      {y.annualDisb > 0 ? fmt(y.annualDisb) : "—"}
-                    </td>
+                    {isColVisible("disbAmt") && (
+                      <td className="px-3 py-2.5 text-sky-400 font-mono font-medium">
+                        {y.annualDisb > 0 ? fmt(y.annualDisb) : "—"}
+                      </td>
+                    )}
 
-                    {hasDirectPay && (
+                    {hasDirectPay && isColVisible("directPayAmt") && (
                       <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
                         {y.annualDirectPay > 0 ? fmt(y.annualDirectPay) : "—"}
                       </td>
                     )}
 
-                    <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
-                      {fmt(y.annualEmi)}
-                    </td>
+                    {isColVisible("emi") && (
+                      <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
+                        {fmt(y.annualEmi)}
+                      </td>
+                    )}
 
-                    <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
-                      {fmt(y.annualPrin)}
-                    </td>
+                    {isColVisible("prinPay") && (
+                      <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
+                        {fmt(y.annualPrin)}
+                      </td>
+                    )}
 
-                    <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
-                      {fmt(y.annualInt)}
-                    </td>
+                    {isColVisible("intPay") && (
+                      <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
+                        {fmt(y.annualInt)}
+                      </td>
+                    )}
 
-                    <td className="px-3 py-2.5 text-emerald-400 font-mono font-semibold">
-                      {y.annualSaved > 0 ? fmt(y.annualSaved) : "—"}
-                    </td>
+                    {isColVisible("interestSaved") && (
+                      <td className="px-3 py-2.5 text-emerald-400 font-mono font-semibold">
+                        {y.annualSaved > 0 ? fmt(y.annualSaved) : "—"}
+                      </td>
+                    )}
 
-                    <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
-                      {fmt(y.yearEndBalance)}
-                    </td>
+                    {isColVisible("remaining") && (
+                      <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
+                        {fmt(y.yearEndBalance)}
+                      </td>
+                    )}
                   </tr>
 
                   {/* Expanded Months for this Year */}
                   {isYearExpanded && (
                     <tr>
-                      <td colSpan={8 + (hasDirectPay ? 1 : 0)} className="p-0">
+                      <td colSpan={yearlyHeaders.length} className="p-0">
                         <div
                           className={`p-3 pl-8 border-b ${
                             isDark ? "bg-slate-950/50" : "bg-slate-50/60"
@@ -301,19 +349,11 @@ export function YearlyScheduleTable({
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className={isDark ? "bg-slate-900/80" : "bg-white"}>
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Mo</th>
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Date</th>
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Rate</th>
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Disb</th>
-                                  {hasDirectPay && (
-                                    <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Direct Pay</th>
-                                  )}
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>EMI</th>
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Principal</th>
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Interest</th>
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Saved</th>
-                                  {hasOd && <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>OD Bal</th>}
-                                  <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Balance</th>
+                                  {monthHeaders.map((h) => (
+                                    <th key={h.id} className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>
+                                      {h.label}
+                                    </th>
+                                  ))}
                                 </tr>
                               </thead>
                               <tbody>
@@ -333,67 +373,85 @@ export function YearlyScheduleTable({
                                             : "hover:bg-slate-100/50"
                                         }`}
                                       >
-                                        <td className="px-2 py-1.5 font-medium whitespace-nowrap">
-                                          <div className="flex items-center gap-1">
-                                            <button
-                                              type="button"
-                                              onClick={() => toggleMonth(r.m)}
-                                              className={`p-0.5 rounded cursor-pointer ${
-                                                isDark ? "hover:bg-slate-700" : "hover:bg-slate-200"
-                                              }`}
-                                            >
-                                              {isMonthExpanded ? (
-                                                <ChevronDown size={12} className="text-sky-400" />
-                                              ) : (
-                                                <ChevronRight size={12} className="opacity-60" />
+                                        {isColVisible("m") && (
+                                          <td className="px-2 py-1.5 font-medium whitespace-nowrap">
+                                            <div className="flex items-center gap-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => toggleMonth(r.m)}
+                                                className={`p-0.5 rounded cursor-pointer ${
+                                                  isDark ? "hover:bg-slate-700" : "hover:bg-slate-200"
+                                                }`}
+                                              >
+                                                {isMonthExpanded ? (
+                                                  <ChevronDown size={12} className="text-sky-400" />
+                                                ) : (
+                                                  <ChevronRight size={12} className="opacity-60" />
+                                                )}
+                                              </button>
+                                              <span>M{r.m}</span>
+                                              {isCur && (
+                                                <span className="px-1 py-0.2 rounded text-[8px] font-bold bg-sky-500 text-white">
+                                                  NOW
+                                                </span>
                                               )}
-                                            </button>
-                                            <span>M{r.m}</span>
-                                            {isCur && (
-                                              <span className="px-1 py-0.2 rounded text-[8px] font-bold bg-sky-500 text-white">
-                                                NOW
-                                              </span>
-                                            )}
-                                          </div>
-                                        </td>
-                                        <td className={`px-2 py-1.5 ${subtext}`}>{r.date}</td>
-                                        <td className="px-2 py-1.5 text-indigo-400 font-mono text-[11px]">
-                                          {r.rate !== undefined ? `${r.rate}%` : "—"}
-                                        </td>
-                                        <td className="px-2 py-1.5 text-sky-400 font-mono">
-                                          {r.disbAmt > 0 ? fmt(r.disbAmt) : "—"}
-                                        </td>
-                                        {hasDirectPay && (
+                                            </div>
+                                          </td>
+                                        )}
+                                        {isColVisible("date") && (
+                                          <td className={`px-2 py-1.5 ${subtext}`}>{r.date}</td>
+                                        )}
+                                        {isColVisible("rate") && (
+                                          <td className="px-2 py-1.5 text-indigo-400 font-mono text-[11px]">
+                                            {r.rate !== undefined ? `${r.rate}%` : "—"}
+                                          </td>
+                                        )}
+                                        {isColVisible("disbAmt") && (
+                                          <td className="px-2 py-1.5 text-sky-400 font-mono">
+                                            {r.disbAmt > 0 ? fmt(r.disbAmt) : "—"}
+                                          </td>
+                                        )}
+                                        {hasDirectPay && isColVisible("directPayAmt") && (
                                           <td className="px-2 py-1.5 text-teal-400 font-mono">
                                             {(r.directPayAmt || 0) > 0 ? fmt(r.directPayAmt!) : "—"}
                                           </td>
                                         )}
-                                        <td className={`px-2 py-1.5 font-mono font-semibold ${heading}`}>
-                                          {r.emi > 0 ? fmt(r.emi) : "—"}
-                                        </td>
-                                        <td className="px-2 py-1.5 text-teal-400 font-mono">
-                                          {r.prinPay > 0 ? fmt(r.prinPay) : "—"}
-                                        </td>
-                                        <td className="px-2 py-1.5 text-amber-400 font-mono">
-                                          {r.intPay > 0 ? fmt(r.intPay) : "—"}
-                                        </td>
-                                        <td className="px-2 py-1.5 text-emerald-400 font-mono font-medium">
-                                          {r.interestSaved > 0 ? fmt(r.interestSaved) : "—"}
-                                        </td>
-                                        {hasOd && (
+                                        {isColVisible("emi") && (
+                                          <td className={`px-2 py-1.5 font-mono font-semibold ${heading}`}>
+                                            {r.emi > 0 ? fmt(r.emi) : "—"}
+                                          </td>
+                                        )}
+                                        {isColVisible("prinPay") && (
+                                          <td className="px-2 py-1.5 text-teal-400 font-mono">
+                                            {r.prinPay > 0 ? fmt(r.prinPay) : "—"}
+                                          </td>
+                                        )}
+                                        {isColVisible("intPay") && (
+                                          <td className="px-2 py-1.5 text-amber-400 font-mono">
+                                            {r.intPay > 0 ? fmt(r.intPay) : "—"}
+                                          </td>
+                                        )}
+                                        {isColVisible("interestSaved") && (
+                                          <td className="px-2 py-1.5 text-emerald-400 font-mono font-medium">
+                                            {r.interestSaved > 0 ? fmt(r.interestSaved) : "—"}
+                                          </td>
+                                        )}
+                                        {hasOd && isColVisible("odBal") && (
                                           <td className="px-2 py-1.5 text-emerald-400 font-mono">
                                             {r.odBal > 0 ? fmt(r.odBal) : "—"}
                                           </td>
                                         )}
-                                        <td className={`px-2 py-1.5 font-mono font-bold ${heading}`}>
-                                          {fmt(r.remaining)}
-                                        </td>
+                                        {isColVisible("remaining") && (
+                                          <td className={`px-2 py-1.5 font-mono font-bold ${heading}`}>
+                                            {fmt(r.remaining)}
+                                          </td>
+                                        )}
                                       </tr>
 
                                       {/* Day-Wise Breakdown if expanded */}
                                       {isMonthExpanded && (
                                         <tr>
-                                          <td colSpan={9 + (hasOd ? 1 : 0) + (hasDirectPay ? 1 : 0)} className="p-0">
+                                          <td colSpan={monthHeaders.length} className="p-0">
                                             {renderDailyBreakdown(r)}
                                           </td>
                                         </tr>
