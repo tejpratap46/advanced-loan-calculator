@@ -13,7 +13,8 @@ const firebaseConfig = {
   measurementId: "G-DXSK0TFBFN",
 };
 
-(window as any).__FIREBASE_CONFIG__ = firebaseConfig;
+(window as unknown as { __FIREBASE_CONFIG__?: unknown }).__FIREBASE_CONFIG__ =
+  firebaseConfig;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -32,15 +32,33 @@ try {
  * @param error The error object from a Firebase operation
  * @param context A string describing where the error occurred
  */
-export const logFirebaseError = (error: any, context: string) => {
+interface FirebaseErrorShape {
+  code?: string;
+  name?: string;
+  message?: string;
+  stack?: string;
+}
+
+export const logFirebaseError = (
+  error: unknown,
+  context: string,
+  extra?: Record<string, unknown>,
+) => {
+  const fbErr = error as FirebaseErrorShape | undefined;
   const errorMessage = error instanceof Error ? error.message : String(error);
-  const errorCode = (error as any)?.code || "unknown-error";
+  const errorCode = fbErr?.code || "unknown-error";
+  const errorName = fbErr?.name || (error instanceof Error ? error.name : "Error");
+  const stack = error instanceof Error ? error.stack : fbErr?.stack;
 
   console.error(`[Firebase Error] in ${context}:`, {
     code: errorCode,
+    name: errorName,
     message: errorMessage,
+    stack,
+    ...(extra || {}),
     originalError: error,
   });
+  console.error(error);
 };
 
 export { app, auth, db };

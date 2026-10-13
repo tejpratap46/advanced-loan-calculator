@@ -20,6 +20,7 @@ import {
   Calendar,
   TrendingUp,
   Building2,
+  Copy,
 } from "lucide-react";
 
 // Types
@@ -252,43 +253,89 @@ export default function LoanCalculator() {
     return stored ? JSON.parse(stored) : null;
   };
 
+  const findUndefinedPaths = (obj: unknown, prefix = ""): string[] => {
+    if (!obj || typeof obj !== "object") return [];
+    const paths: string[] = [];
+    if (Array.isArray(obj)) {
+      obj.forEach((item, index) => {
+        paths.push(...findUndefinedPaths(item, `${prefix}[${index}]`));
+      });
+    } else {
+      for (const [key, val] of Object.entries(obj)) {
+        const fullPath = prefix ? `${prefix}.${key}` : key;
+        if (val === undefined) {
+          paths.push(fullPath);
+        } else if (val && typeof val === "object") {
+          paths.push(...findUndefinedPaths(val, fullPath));
+        }
+      }
+    }
+    return paths;
+  };
+
+  const sanitizeFirestorePayload = <T,>(data: T): T => {
+    return JSON.parse(JSON.stringify(data));
+  };
+
   const ensureFirebase = async (): Promise<FirebaseBridge> => {
-    await loadFirebaseSdk();
-    const cfg = getFirebaseConfig();
-    if (!cfg) throw new Error("Missing Firebase config");
-    const fb = (window as unknown as { firebase: FirebaseBridge }).firebase;
-    if (!fb.apps.length) fb.initializeApp(cfg);
-    return fb;
+    try {
+      await loadFirebaseSdk();
+      const cfg = getFirebaseConfig();
+      if (!cfg) throw new Error("Missing Firebase config");
+      const fb = (window as unknown as { firebase: FirebaseBridge }).firebase;
+      if (!fb) throw new Error("Firebase SDK failed to load onto window.firebase");
+      if (!fb.apps.length) fb.initializeApp(cfg);
+      return fb;
+    } catch (error) {
+      console.error("[Firebase Init] Failed to ensure Firebase SDK:", error);
+      throw error;
+    }
   };
 
   const signInWithGoogle = async () => {
     try {
+      console.info("[Firebase Auth] Initiating Google sign-in popup...");
       const fb = await ensureFirebase();
       const provider = new fb.auth.GoogleAuthProvider();
       await fb.auth().signInWithPopup(provider);
+      console.info("[Firebase Auth] Signed in successfully with Google.");
       showToast("Signed in with Google", "success");
     } catch (error: unknown) {
-      console.error("Firebase Login Error:", error);
+      console.error("[Firebase Auth] Firebase Login Error:", error);
       showToast(`Login failed: ${(error as Error)?.message || "Unknown error"}`, "error");
     }
   };
 
   const signOut = async () => {
     try {
+      console.info("[Firebase Auth] Signing out user...");
       const fb = await ensureFirebase();
       await fb.auth().signOut();
+      console.info("[Firebase Auth] Signed out successfully.");
       showToast("Signed out", "success");
-    } catch {
-      showToast("Sign out failed", "error");
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      console.error("[Firebase Auth] Sign out failed:", error);
+      showToast(err?.message ? `Sign out failed: ${err.message}` : "Sign out failed", "error");
     }
   };
 
   const initiateSync = async () => {
     setSyncBusy(true);
+    let currentUser: { uid: string; email?: string | null } | null = null;
     try {
+      console.info("[Firestore Sync] Checking Firestore for remote user data...");
       const fb = await ensureFirebase();
       const user = fb.auth().currentUser;
-      if (!user) throw new Error("No user");
+      currentUser = user;
+      if (!user) {
+        throw new Error("No authenticated Firebase user found. Please sign in first.");
+      }
+
+      console.info(`[Firestore Sync] Fetching document 'loanCalculatorUsers/${user.uid}'...`, {
+        userId: user.uid,
+        userEmail: user.email || null,
+      });
 
       const doc = await fb
         .firestore()
@@ -297,15 +344,44 @@ export default function LoanCalculator() {
         .get();
       const d = doc.data();
       if (doc.exists && d && d.loans && d.loans.length > 0) {
+        console.info(
+          `[Firestore Sync] Found ${d.loans.length} existing remote loan(s) on Firestore for user '${user.uid}'. Showing conflict resolution modal.`,
+          {
+            serverLoansCount: d.loans.length,
+            serverActiveId: d.activeId || "",
+            loans: d.loans,
+          },
+        );
         setSyncModalData({
           serverLoans: migrateLoans(d.loans),
           serverActiveId: d.activeId || "",
         });
       } else {
+        console.info(
+          `[Firestore Sync] No existing remote loans found for user '${user.uid}' (doc exists: ${Boolean(doc.exists)}). Uploading local data...`,
+        );
         await performSyncPush();
       }
-    } catch {
-      showToast("Sync check failed", "error");
+    } catch (error: unknown) {
+      const err = error as {
+        name?: string;
+        code?: string;
+        message?: string;
+        stack?: string;
+      };
+      console.error("[Firestore Sync] Error during sync check / fetch:", error);
+      console.error("[Firestore Sync] Sync check failure details:", {
+        errorMessage: err?.message || String(error),
+        errorCode: err?.code || "unknown",
+        errorName: err?.name || "Error",
+        errorStack: err?.stack,
+        userId: currentUser?.uid || "N/A",
+        userEmail: currentUser?.email || "N/A",
+        docPath: currentUser?.uid ? `loanCalculatorUsers/${currentUser.uid}` : "N/A",
+        rawError: error,
+      });
+      const failureMessage = err?.message ? `Sync check failed: ${err.message}` : "Sync check failed";
+      showToast(failureMessage, "error");
     } finally {
       setSyncBusy(false);
     }
@@ -318,26 +394,82 @@ export default function LoanCalculator() {
     setSyncBusy(true);
     const lns = overrideLoans || loans;
     const actId = overrideActiveId || activeTabId;
+    let currentUser: { uid: string; email?: string | null } | null = null;
+    let payloadToSync: Record<string, unknown> | null = null;
     try {
+      console.info("[Firestore Sync] Starting Firestore sync push...");
       const fb = await ensureFirebase();
       const user = fb.auth().currentUser;
-      if (!user) throw new Error("No user");
+      currentUser = user;
+      if (!user) {
+        throw new Error("No authenticated Firebase user found. Please sign in first.");
+      }
+
+      const rawPayload = {
+        loans: lns,
+        activeId: actId,
+        updatedAt: new Date().toISOString(),
+        email: user.email || null,
+      };
+
+      const undefinedPaths = findUndefinedPaths(rawPayload);
+      if (undefinedPaths.length > 0) {
+        console.warn(
+          "[Firestore Sync] Detected undefined properties in upload payload (cleaning before upload):",
+          undefinedPaths,
+        );
+      }
+
+      // Firestore DocumentReference.set() rejects fields with `undefined` values.
+      // Sanitizing ensures clean JSON data without stripping valid values.
+      const sanitizedPayload = sanitizeFirestorePayload(rawPayload);
+      payloadToSync = sanitizedPayload;
+
+      console.info(`[Firestore Sync] Uploading document to 'loanCalculatorUsers/${user.uid}':`, {
+        userId: user.uid,
+        userEmail: user.email || null,
+        loansCount: lns.length,
+        activeId: actId,
+        payload: sanitizedPayload,
+      });
+
       await fb
         .firestore()
         .collection("loanCalculatorUsers")
         .doc(user.uid)
-        .set(
-          {
-            loans: lns,
-            activeId: actId,
-            updatedAt: new Date().toISOString(),
-            email: user.email || null,
-          },
-          { merge: true },
-        );
+        .set(sanitizedPayload, { merge: true });
+
+      console.info(
+        `[Firestore Sync] Successfully synced ${lns.length} loan(s) to Cloud Firestore for user '${user.uid}'.`,
+      );
       showToast("Synced to Cloud Firestore", "success");
-    } catch {
-      showToast("Sync failed", "error");
+    } catch (error: unknown) {
+      const err = error as {
+        name?: string;
+        code?: string;
+        message?: string;
+        stack?: string;
+      };
+
+      console.error("[Firestore Sync] Error uploading to Firestore:", error);
+      console.error("[Firestore Sync] Sync upload failure details:", {
+        errorMessage: err?.message || String(error),
+        errorCode: err?.code || "unknown",
+        errorName: err?.name || "Error",
+        errorStack: err?.stack,
+        userId: currentUser?.uid || "N/A",
+        userEmail: currentUser?.email || "N/A",
+        docPath: currentUser?.uid ? `loanCalculatorUsers/${currentUser.uid}` : "N/A",
+        payloadSummary: {
+          loansCount: lns?.length ?? 0,
+          activeId: actId,
+        },
+        payload: payloadToSync,
+        rawError: error,
+      });
+
+      const failureMessage = err?.message ? `Sync failed: ${err.message}` : "Sync failed";
+      showToast(failureMessage, "error");
     } finally {
       setSyncBusy(false);
       setSyncModalData(null);
@@ -762,47 +894,100 @@ export default function LoanCalculator() {
       {/* ── Share Modal ───────────────────────────────────────────────────── */}
       {showShareModal && (
         <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fadeIn"
+          className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn"
           onClick={() => setShowShareModal(false)}
         >
           <div
-            className={`${card} max-w-md w-full p-6 animate-scaleUp`}
+            className={`${card} max-w-md sm:max-w-lg w-full max-h-[calc(100vh-2rem)] sm:max-h-[85vh] flex flex-col p-5 sm:p-6 animate-scaleUp overflow-hidden shadow-2xl`}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
+            {/* Header (pinned) */}
+            <div className="flex items-center justify-between mb-4 shrink-0">
+              <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400">
                   <Share2 size={18} />
                 </div>
-                <h3 className={`text-base font-bold ${heading}`}>
-                  Share Calculator
-                </h3>
+                <div>
+                  <h3 className={`text-base font-bold ${heading}`}>
+                    Share Calculator
+                  </h3>
+                  <p className={`text-[11px] ${subtext}`}>
+                    Encrypted URL link containing your loan scenarios
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowShareModal(false)}
-                className={`p-1.5 rounded-xl hover:bg-white/10 ${subtext}`}
+                className={`p-1.5 rounded-xl hover:bg-white/10 ${subtext} transition-colors cursor-pointer`}
+                aria-label="Close"
               >
                 <X size={16} />
               </button>
             </div>
-            <p className={`text-xs mb-3 ${subtext}`}>
-              Share this exact calculation scenario with teammates or clients via an encrypted URL link:
-            </p>
-            <div
-              className={`rounded-xl p-3 mb-4 break-all text-xs font-mono select-all border ${
-                isDark
-                  ? "bg-slate-950 border-slate-800 text-slate-300"
-                  : "bg-slate-100 border-slate-200 text-slate-700"
-              }`}
-            >
-              {getShareUrl({ loans, activeId: activeTabId })}
+
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto min-h-0 pr-1 -mr-1 custom-scrollbar space-y-3.5">
+              <p className={`text-xs ${subtext} leading-relaxed`}>
+                Share this exact calculation scenario with teammates or clients via an encrypted URL link:
+              </p>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-medium">
+                  <span className={subtext}>
+                    Shareable Link ({loans.length} {loans.length === 1 ? "scenario" : "scenarios"})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={copy}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-sky-400 hover:text-sky-300 transition-colors cursor-pointer"
+                  >
+                    {copied ? (
+                      <>
+                        <Check size={12} className="text-emerald-400" />
+                        <span className="text-emerald-400">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={12} />
+                        <span>Quick Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div
+                  className={`rounded-xl p-3 max-h-36 sm:max-h-44 overflow-y-auto custom-scrollbar break-all text-xs font-mono select-all border transition-colors ${
+                    isDark
+                      ? "bg-slate-950/90 border-slate-800 text-slate-300 focus-within:border-sky-500/50"
+                      : "bg-slate-100 border-slate-200 text-slate-700 focus-within:border-sky-500/50"
+                  }`}
+                  tabIndex={0}
+                  title="Click to select all"
+                >
+                  {getShareUrl({ loans, activeId: activeTabId })}
+                </div>
+              </div>
+
+              <div
+                className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                  isDark
+                    ? "bg-sky-500/5 border-sky-500/20 text-sky-300"
+                    : "bg-sky-50 border-sky-200 text-sky-800"
+                }`}
+              >
+                <Sparkles size={15} className="shrink-0 mt-0.5 text-sky-400" />
+                <p className="text-[11px] leading-relaxed">
+                  Anyone with this link will open your exact loan configuration, including all custom EMIs, lump sums, interest rates, and active tab.
+                </p>
+              </div>
             </div>
-            <div className="flex gap-2">
+
+            {/* Footer Buttons (pinned at bottom, never cut off) */}
+            <div className={`shrink-0 pt-4 mt-3 border-t ${divider} flex gap-2`}>
               <button
                 type="button"
                 onClick={copy}
-                className="flex-1 px-4 py-2.5 bg-sky-500 hover:bg-sky-400 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-sky-500/25 transition-all"
+                className="flex-1 px-4 py-2.5 bg-sky-500 hover:bg-sky-400 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-sky-500/25 transition-all cursor-pointer"
               >
                 {copied ? (
                   <>
@@ -817,7 +1002,7 @@ export default function LoanCalculator() {
               <button
                 type="button"
                 onClick={() => setShowShareModal(false)}
-                className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
                   isDark
                     ? "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
                     : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
@@ -833,11 +1018,11 @@ export default function LoanCalculator() {
       {/* ── Sync Modal ────────────────────────────────────────────────────── */}
       {syncModalData && (
         <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fadeIn"
+          className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn"
           onClick={() => setSyncModalData(null)}
         >
           <div
-            className={`${card} max-w-md w-full p-6 animate-scaleUp`}
+            className={`${card} max-w-md w-full max-h-[90vh] overflow-y-auto p-6 animate-scaleUp`}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">

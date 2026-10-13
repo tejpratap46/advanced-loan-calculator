@@ -1,4 +1,4 @@
-export const encodeData = (data: any) =>
+export const encodeData = (data: unknown) =>
   btoa(encodeURIComponent(JSON.stringify(data)));
 
 export const decodeData = (hash: string) => {
@@ -14,5 +14,5 @@ export const decodeData = (hash: string) => {
   }
 };
 
-export const getShareUrl = (data: any) =>
+export const getShareUrl = (data: unknown) =>
   `${window.location.origin}${window.location.pathname}#${encodeData(data)}`;
