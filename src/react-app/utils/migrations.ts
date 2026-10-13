@@ -1,4 +1,4 @@
-import type { Loan, Dispersal, LumpSum, CustomEmi, CustomRate } from "../types/index.ts";
+import type { Loan, Dispersal, LumpSum, CustomEmi, CustomRate, DirectPayment } from "../types/index.ts";
 
 export const migrateLoans = (loans: Loan[]): Loan[] => {
   if (!Array.isArray(loans)) return [];
@@ -62,13 +62,22 @@ export const migrateLoans = (loans: Loan[]): Loan[] => {
     let migratedCustomEmis = data.customEmis || [];
     if (migratedCustomEmis.length > 0) {
       migratedCustomEmis = (migratedCustomEmis as unknown[]).map((e, idx) => {
-        const item = e as { id?: string; fromMonth: number; day?: number; amount: number };
+        const item = e as {
+          id?: string;
+          fromMonth: number;
+          day?: number;
+          type?: import("../types/index.ts").CustomEmiType;
+          amount?: number;
+        };
         const resolvedDay = item.day ?? defaultStartDay;
+        const resolvedType =
+          item.type || (item.amount !== undefined && item.amount > 0 ? "custom" : "interest_only");
         return {
           id: item.id || `emi-${item.fromMonth}-${resolvedDay}-${idx}`,
           fromMonth: item.fromMonth,
           day: resolvedDay,
-          amount: item.amount,
+          type: resolvedType,
+          amount: item.amount !== undefined ? Number(item.amount) : undefined,
         } as CustomEmi;
       });
     }
@@ -87,6 +96,27 @@ export const migrateLoans = (loans: Loan[]): Loan[] => {
       });
     }
 
+    let migratedDirectPayments = data.directPayments || [];
+    if (migratedDirectPayments.length > 0) {
+      migratedDirectPayments = (migratedDirectPayments as unknown[]).map((dp, idx) => {
+        const item = dp as {
+          id?: string;
+          month: number;
+          day?: number;
+          amount: number;
+          recipient?: string;
+        };
+        const resolvedDay = Math.min(31, Math.max(1, item.day ?? 1));
+        return {
+          id: item.id || `direct-${item.month}-${resolvedDay}-${idx}`,
+          month: item.month,
+          day: resolvedDay,
+          amount: Number(item.amount) || 0,
+          recipient: item.recipient || "",
+        } as DirectPayment;
+      });
+    }
+
     return {
       ...loan,
       data: {
@@ -100,6 +130,7 @@ export const migrateLoans = (loans: Loan[]): Loan[] => {
         customRates: migratedCustomRates,
         baselineOd: data.baselineOd ?? 0,
         customOds: data.customOds || [],
+        directPayments: migratedDirectPayments,
         miscExpenses: data.miscExpenses || [],
       },
     };

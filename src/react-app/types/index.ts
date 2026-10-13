@@ -5,11 +5,14 @@ export interface Dispersal {
   amount: number;
 }
 
+export type CustomEmiType = "interest_only" | "recalculated" | "custom";
+
 export interface CustomEmi {
   id?: string;
   fromMonth: number;
   day?: number;
-  amount: number;
+  type?: CustomEmiType;
+  amount?: number;
 }
 
 export interface LumpSum {
@@ -24,6 +27,14 @@ export interface CustomRate {
   fromMonth: number;
   day?: number;
   rate: number;
+}
+
+export interface DirectPayment {
+  id?: string;
+  month: number;
+  day?: number;
+  amount: number;
+  recipient?: string;
 }
 
 export interface MiscExpense {
@@ -44,6 +55,7 @@ export interface LoanData {
   customRates?: CustomRate[];
   baselineOd?: number;
   customOds?: { fromMonth: number; amount: number }[];
+  directPayments?: DirectPayment[];
   miscExpenses?: MiscExpense[];
 }
 
@@ -61,6 +73,8 @@ export interface DayDetail {
   disbAmt: number;
   emiAmt: number;
   lumpAmt: number;
+  directPayAmt?: number;
+  directPayRecipient?: string;
   prinPay: number;
   intPay: number;
   interestSaved: number;
@@ -76,6 +90,8 @@ export interface ScheduleRow {
   rate?: number;
   disbAmt: number;
   emi: number;
+  directPayAmt?: number;
+  cumDirectPay?: number;
   prinPay: number;
   intPay: number;
   remaining: number;
@@ -83,6 +99,7 @@ export interface ScheduleRow {
   payType: "none" | "std" | "custom" | "lump";
   stdEmi: number;
   customEmiAmt: number | null;
+  customEmiType?: CustomEmiType;
   lumpAmt: number | null;
   interestSaved: number;
   odBal: number;

@@ -63,6 +63,7 @@ export function LoanComparisonModal({
         (l.data.customEmis?.length || 0) +
         (l.data.lumpSums?.length || 0) +
         (l.data.customRates?.length || 0) +
+        (l.data.directPayments?.length || 0) +
         (l.data.baselineOd ? 1 : 0);
 
       return {

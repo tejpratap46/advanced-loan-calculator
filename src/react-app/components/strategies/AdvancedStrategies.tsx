@@ -6,11 +6,22 @@ import {
   TrendingUp,
   DollarSign,
   Receipt,
+  Building2,
   X,
   LayoutGrid,
   Columns,
 } from "lucide-react";
-import type { LoanData, Dispersal, CustomEmi, LumpSum, CustomRate, MiscExpense } from "../../types";
+import type {
+  LoanData,
+  Dispersal,
+  CustomEmi,
+  CustomEmiType,
+  ScheduleRow,
+  LumpSum,
+  CustomRate,
+  DirectPayment,
+  MiscExpense,
+} from "../../types";
 import { NumInput } from "../ui/NumInput";
 import { StrInput } from "../ui/StrInput";
 import { ActionBtn } from "../ui/ActionBtn";
@@ -25,6 +36,7 @@ interface AdvancedStrategiesProps {
   getResolvedDate: (monthNum: number, dayNum: number) => string;
   externalActiveTab?: StrategyTab;
   onActiveTabChange?: (tab: StrategyTab) => void;
+  schedule?: ScheduleRow[];
 }
 
 export type StrategyTab =
@@ -33,6 +45,7 @@ export type StrategyTab =
   | "lumpSums"
   | "rates"
   | "overdraft"
+  | "directPayments"
   | "misc";
 
 export function AdvancedStrategies({
@@ -44,6 +57,7 @@ export function AdvancedStrategies({
   getResolvedDate,
   externalActiveTab,
   onActiveTabChange,
+  schedule,
 }: AdvancedStrategiesProps) {
   const [internalActiveTab, setInternalActiveTab] = useState<StrategyTab>("dispersals");
   const [layoutMode, setLayoutMode] = useState<"workbench" | "grid">("workbench");
@@ -63,6 +77,26 @@ export function AdvancedStrategies({
       maximumFractionDigits: 0,
     }).format(v);
 
+  const getCalculatedPI = (m: number): number => {
+    if (schedule && schedule.length > 0) {
+      const r = schedule.find((row) => row.m === m);
+      if (r) {
+        return Math.round(r.stdEmi || (r.prinPay + r.intPay) || r.emi);
+      }
+    }
+    const y = data.years || 1;
+    const tm = y * 12;
+    const rm = Math.max(1, tm - m + 1);
+    const monthlyRate = (data.rate || 0) / 100 / 12;
+    const p = data.principal || 0;
+    if (p <= 0 || rm <= 0) return 0;
+    if (monthlyRate === 0) return Math.round(p / rm);
+    return Math.round(
+      (p * monthlyRate * Math.pow(1 + monthlyRate, rm)) /
+        (Math.pow(1 + monthlyRate, rm) - 1),
+    );
+  };
+
   // ── Sub-form states ────────────────────────────────────────────────────────
   const [newDisp, setNewDisp] = useState<{
     id?: string;
@@ -76,9 +110,10 @@ export function AdvancedStrategies({
     id?: string;
     fromMonth: number;
     day: number;
+    type: CustomEmiType;
     amount: string;
     originalId?: string;
-  }>({ fromMonth: 1, day: 1, amount: "" });
+  }>({ fromMonth: 1, day: 1, type: "interest_only", amount: "" });
 
   const [newLump, setNewLump] = useState<{
     id?: string;
@@ -112,6 +147,20 @@ export function AdvancedStrategies({
     date: new Date().toISOString().split("T")[0],
     amount: "",
     comments: "",
+  });
+
+  const [newDirectPay, setNewDirectPay] = useState<{
+    id?: string;
+    month: number;
+    day: number;
+    amount: string;
+    recipient: string;
+    originalId?: string;
+  }>({
+    month: 1,
+    day: 1,
+    amount: "",
+    recipient: "",
   });
 
   // ── Strategy action handlers ───────────────────────────────────────────────
@@ -151,10 +200,19 @@ export function AdvancedStrategies({
   };
 
   const addCEmi = () => {
-    const a = parseFloat(newEmi.amount);
-    if (!a || a <= 0 || newEmi.fromMonth < 1) return;
+    if (newEmi.fromMonth < 1) return;
     const day = Math.min(31, Math.max(1, newEmi.day || 1));
     const current = data.customEmis || [];
+    const minPI = getCalculatedPI(newEmi.fromMonth);
+
+    let finalAmount: number | undefined = undefined;
+    if (newEmi.type === "custom") {
+      const a = parseFloat(newEmi.amount);
+      if (!a || a <= 0) return;
+      if (minPI > 0 && a <= minPI) return;
+      finalAmount = a;
+    }
+
     let updated: CustomEmi[];
     if (newEmi.originalId) {
       updated = current.map((e) =>
@@ -164,7 +222,8 @@ export function AdvancedStrategies({
               id: e.id || newEmi.originalId,
               fromMonth: newEmi.fromMonth,
               day,
-              amount: a,
+              type: newEmi.type,
+              amount: finalAmount,
             }
           : e,
       );
@@ -173,7 +232,8 @@ export function AdvancedStrategies({
         id: `emi-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         fromMonth: newEmi.fromMonth,
         day,
-        amount: a,
+        type: newEmi.type,
+        amount: finalAmount,
       };
       updated = [...current, newItem];
     }
@@ -182,7 +242,7 @@ export function AdvancedStrategies({
         (a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1),
       ),
     });
-    setNewEmi({ fromMonth: 1, day: 1, amount: "" });
+    setNewEmi({ fromMonth: 1, day: 1, type: "interest_only", amount: "" });
   };
 
   const addLS = () => {
@@ -305,6 +365,44 @@ export function AdvancedStrategies({
     });
   };
 
+  const addDirectPay = () => {
+    const a = parseFloat(newDirectPay.amount);
+    if (isNaN(a) || a <= 0 || newDirectPay.month < 1 || newDirectPay.month > data.years * 12)
+      return;
+    const day = Math.min(31, Math.max(1, newDirectPay.day || 1));
+    const current = data.directPayments || [];
+    let updated: DirectPayment[];
+    if (newDirectPay.originalId) {
+      updated = current.map((dp) =>
+        (dp.id && dp.id === newDirectPay.originalId) ||
+        (!dp.id && `${dp.month}-${dp.day || 1}` === newDirectPay.originalId)
+          ? {
+              id: dp.id || newDirectPay.originalId,
+              month: newDirectPay.month,
+              day,
+              amount: a,
+              recipient: newDirectPay.recipient.trim() || undefined,
+            }
+          : dp,
+      );
+    } else {
+      const newItem: DirectPayment = {
+        id: `direct-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        month: newDirectPay.month,
+        day,
+        amount: a,
+        recipient: newDirectPay.recipient.trim() || undefined,
+      };
+      updated = [...current, newItem];
+    }
+    updateData({
+      directPayments: updated.sort(
+        (a, b) => a.month - b.month || (a.day || 1) - (b.day || 1),
+      ),
+    });
+    setNewDirectPay({ month: 1, day: 1, amount: "", recipient: "" });
+  };
+
   // ── Tokens & Styling ───────────────────────────────────────────────────────
   const subtext = isDark ? "text-slate-400" : "text-slate-500";
   const heading = isDark ? "text-white" : "text-slate-900";
@@ -381,6 +479,20 @@ export function AdvancedStrategies({
       activeTabStyle: isDark
         ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-xs"
         : "bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs",
+    },
+    {
+      id: "directPayments" as StrategyTab,
+      label: "Direct Payments",
+      shortLabel: "Direct",
+      icon: <Building2 size={14} />,
+      count: data.directPayments?.length || 0,
+      accentColor: "teal",
+      badgeClass: isDark
+        ? "bg-teal-500/10 text-teal-300 border-teal-500/20"
+        : "bg-teal-50 text-teal-700 border-teal-200",
+      activeTabStyle: isDark
+        ? "bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-xs"
+        : "bg-teal-50 text-teal-800 border-teal-300 shadow-xs",
     },
     {
       id: "misc" as StrategyTab,
@@ -630,7 +742,7 @@ export function AdvancedStrategies({
                       Custom EMI Overrides ({data.customEmis.length})
                     </span>
                     <span className={`text-xs ${subtext}`}>
-                      Step-up or step-down payments
+                      Step-up, interest-only, or recalculated payments
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
@@ -641,49 +753,61 @@ export function AdvancedStrategies({
                     ) : (
                       data.customEmis
                         .sort((a, b) => a.fromMonth - b.fromMonth || (a.day || 1) - (b.day || 1))
-                        .map((e) => (
-                          <span
-                            key={e.id || `${e.fromMonth}-${e.day}`}
-                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
-                              isDark
-                                ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
-                                : "bg-violet-50 text-violet-700 border-violet-200"
-                            }`}
-                          >
+                        .map((e) => {
+                          const eType =
+                            e.type || (e.amount !== undefined && e.amount > 0 ? "custom" : "interest_only");
+                          const label =
+                            eType === "interest_only"
+                              ? `From M${e.fromMonth} · D${e.day || 1}: Only Interest`
+                              : eType === "recalculated"
+                              ? `From M${e.fromMonth} · D${e.day || 1}: Recalculated EMI`
+                              : `From M${e.fromMonth} · D${e.day || 1}: ${fmt(e.amount || 0)}`;
+
+                          return (
                             <span
-                              className="cursor-pointer hover:underline"
-                              onClick={() => {
-                                setNewEmi({
-                                  id: e.id,
-                                  fromMonth: e.fromMonth,
-                                  day: e.day || 1,
-                                  amount: e.amount.toString(),
-                                  originalId: e.id || `${e.fromMonth}-${e.day || 1}`,
-                                });
-                              }}
-                              title="Click to edit"
+                              key={e.id || `${e.fromMonth}-${e.day}`}
+                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                                isDark
+                                  ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
+                                  : "bg-violet-50 text-violet-700 border-violet-200"
+                              }`}
                             >
-                              From M{e.fromMonth} · D{e.day || 1}: {fmt(e.amount)}
+                              <span
+                                className="cursor-pointer hover:underline"
+                                onClick={() => {
+                                  setNewEmi({
+                                    id: e.id,
+                                    fromMonth: e.fromMonth,
+                                    day: e.day || 1,
+                                    type: eType,
+                                    amount: e.amount ? e.amount.toString() : "",
+                                    originalId: e.id || `${e.fromMonth}-${e.day || 1}`,
+                                  });
+                                }}
+                                title="Click to edit"
+                              >
+                                {label}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateData({
+                                    customEmis: data.customEmis.filter((x) =>
+                                      e.id
+                                        ? x.id !== e.id
+                                        : x.fromMonth !== e.fromMonth ||
+                                          (x.day || 1) !== (e.day || 1),
+                                    ),
+                                  })
+                                }
+                                className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                                title="Remove"
+                              >
+                                <X size={12} />
+                              </button>
                             </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateData({
-                                  customEmis: data.customEmis.filter((x) =>
-                                    e.id
-                                      ? x.id !== e.id
-                                      : x.fromMonth !== e.fromMonth ||
-                                        (x.day || 1) !== (e.day || 1),
-                                  ),
-                                })
-                              }
-                              className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
-                              title="Remove"
-                            >
-                              <X size={12} />
-                            </button>
-                          </span>
-                        ))
+                          );
+                        })
                     )}
                   </div>
                 </div>
@@ -695,7 +819,7 @@ export function AdvancedStrategies({
                 >
                   <div className="flex items-center justify-between mb-2">
                     <span className={`text-xs font-semibold ${subtext}`}>
-                      {newEmi.originalId ? "Edit Custom EMI" : "Add Step-Up / Override EMI"}
+                      {newEmi.originalId ? "Edit Custom EMI Rule" : "Configure Custom EMI Rule"}
                     </span>
                     <span
                       className={`text-xs px-2 py-0.5 rounded-lg font-mono border ${
@@ -707,7 +831,9 @@ export function AdvancedStrategies({
                       📅 {getResolvedDate(newEmi.fromMonth, newEmi.day)}
                     </span>
                   </div>
-                  <div className="flex flex-wrap gap-2 items-center">
+
+                  {/* Month & Day Inputs */}
+                  <div className="flex flex-wrap gap-2 items-center mb-3">
                     <NumInput
                       placeholder="From Month"
                       value={newEmi.fromMonth}
@@ -728,23 +854,180 @@ export function AdvancedStrategies({
                       min={1}
                       max={31}
                     />
-                    <StrInput
-                      placeholder="New EMI Amount"
-                      value={newEmi.amount}
-                      onChange={(v) => setNewEmi({ ...newEmi, amount: v })}
-                      onEnter={addCEmi}
-                      isDark={isDark}
-                    />
-                    <ActionBtn onClick={addCEmi} color="violet" isDark={isDark}>
-                      {newEmi.originalId ? "Save" : "Set Custom EMI"}
-                    </ActionBtn>
-                    {newEmi.originalId && (
-                      <CancelBtn
-                        onClick={() => setNewEmi({ fromMonth: 1, day: 1, amount: "" })}
-                        isDark={isDark}
-                      />
-                    )}
                   </div>
+
+                  {/* 3-Option Selector */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewEmi({ ...newEmi, type: "interest_only" })}
+                      className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                        newEmi.type === "interest_only"
+                          ? isDark
+                            ? "bg-violet-500/20 border-violet-500 text-violet-200 ring-1 ring-violet-500/50"
+                            : "bg-violet-50 border-violet-500 text-violet-900 ring-1 ring-violet-500/40"
+                          : isDark
+                          ? "bg-slate-800/40 border-slate-700/60 text-slate-300 hover:border-slate-600"
+                          : "bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs">
+                        <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] bg-violet-500/20 text-violet-400">
+                          1
+                        </span>
+                        <span>Only Interest</span>
+                      </div>
+                      <p className={`text-[10px] mt-0.5 ${subtext}`}>
+                        No Principal paid; only monthly interest is paid.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setNewEmi({ ...newEmi, type: "recalculated" })}
+                      className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                        newEmi.type === "recalculated"
+                          ? isDark
+                            ? "bg-violet-500/20 border-violet-500 text-violet-200 ring-1 ring-violet-500/50"
+                            : "bg-violet-50 border-violet-500 text-violet-900 ring-1 ring-violet-500/40"
+                          : isDark
+                          ? "bg-slate-800/40 border-slate-700/60 text-slate-300 hover:border-slate-600"
+                          : "bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs">
+                        <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] bg-violet-500/20 text-violet-400">
+                          2
+                        </span>
+                        <span>Calculated P + I</span>
+                      </div>
+                      <p className={`text-[10px] mt-0.5 ${subtext}`}>
+                        Recalculate exact P + I for remaining balance.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setNewEmi({ ...newEmi, type: "custom" })}
+                      className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                        newEmi.type === "custom"
+                          ? isDark
+                            ? "bg-violet-500/20 border-violet-500 text-violet-200 ring-1 ring-violet-500/50"
+                            : "bg-violet-50 border-violet-500 text-violet-900 ring-1 ring-violet-500/40"
+                          : isDark
+                          ? "bg-slate-800/40 border-slate-700/60 text-slate-300 hover:border-slate-600"
+                          : "bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold text-xs">
+                        <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] bg-violet-500/20 text-violet-400">
+                          3
+                        </span>
+                        <span>Custom Higher</span>
+                      </div>
+                      <p className={`text-[10px] mt-0.5 ${subtext}`}>
+                        Custom payment higher than calculated P + I.
+                      </p>
+                    </button>
+                  </div>
+
+                  {/* Mode-Specific Details & Inputs */}
+                  {(() => {
+                    const minPIForMonth = getCalculatedPI(newEmi.fromMonth);
+                    const customAmtNum = parseFloat(newEmi.amount) || 0;
+                    const isCustomInvalid =
+                      newEmi.type === "custom" &&
+                      (customAmtNum <= 0 || (minPIForMonth > 0 && customAmtNum <= minPIForMonth));
+
+                    return (
+                      <div>
+                        {newEmi.type === "interest_only" && (
+                          <div
+                            className={`p-2.5 rounded-lg border text-xs mb-3 flex items-center gap-2 ${
+                              isDark
+                                ? "bg-violet-500/10 border-violet-500/20 text-violet-300"
+                                : "bg-violet-50 border-violet-200 text-violet-800"
+                            }`}
+                          >
+                            <span>💡</span>
+                            <span>
+                              Starting from Month {newEmi.fromMonth}, <strong>zero principal</strong> will be deducted. Only the monthly interest on outstanding balance will be charged.
+                            </span>
+                          </div>
+                        )}
+
+                        {newEmi.type === "recalculated" && (
+                          <div
+                            className={`p-2.5 rounded-lg border text-xs mb-3 flex items-center gap-2 ${
+                              isDark
+                                ? "bg-violet-500/10 border-violet-500/20 text-violet-300"
+                                : "bg-violet-50 border-violet-200 text-violet-800"
+                            }`}
+                          >
+                            <span>💡</span>
+                            <span>
+                              Starting from Month {newEmi.fromMonth}, EMI will be automatically recalculated to{" "}
+                              <strong>{minPIForMonth > 0 ? fmt(minPIForMonth) : "standard amortization"}</strong> for the remaining principal and tenure.
+                            </span>
+                          </div>
+                        )}
+
+                        {newEmi.type === "custom" && (
+                          <div className="space-y-2 mb-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <StrInput
+                                placeholder="Custom EMI Amount"
+                                value={newEmi.amount}
+                                onChange={(v) => setNewEmi({ ...newEmi, amount: v })}
+                                onEnter={addCEmi}
+                                isDark={isDark}
+                              />
+                              {minPIForMonth > 0 && (
+                                <span
+                                  className={`text-[11px] font-mono px-2 py-1 rounded-md border ${
+                                    isDark
+                                      ? "bg-slate-800 text-slate-300 border-slate-700"
+                                      : "bg-slate-100 text-slate-700 border-slate-200"
+                                  }`}
+                                >
+                                  Calculated P+I: {fmt(minPIForMonth)}
+                                </span>
+                              )}
+                            </div>
+                            {newEmi.amount && customAmtNum > 0 && minPIForMonth > 0 && customAmtNum <= minPIForMonth && (
+                              <p className="text-[11px] text-rose-400 font-medium">
+                                ⚠️ Custom amount must be higher than current calculated Principal & Interest ({fmt(minPIForMonth)}).
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <ActionBtn
+                            onClick={addCEmi}
+                            color="violet"
+                            isDark={isDark}
+                            disabled={newEmi.type === "custom" ? isCustomInvalid : false}
+                          >
+                            {newEmi.originalId ? "Save" : "Set Custom EMI"}
+                          </ActionBtn>
+                          {newEmi.originalId && (
+                            <CancelBtn
+                              onClick={() =>
+                                setNewEmi({
+                                  fromMonth: 1,
+                                  day: 1,
+                                  type: "interest_only",
+                                  amount: "",
+                                })
+                              }
+                              isDark={isDark}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -1262,6 +1545,155 @@ export function AdvancedStrategies({
                 </div>
               </div>
             )}
+
+            {/* 6. DIRECT PAYMENTS TAB */}
+            {activeTab === "directPayments" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <div className="lg:col-span-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                      Direct Payments to Third Party ({data.directPayments?.length || 0})
+                    </span>
+                    <span className="text-xs font-mono font-bold text-teal-400">
+                      Total: {fmt((data.directPayments || []).reduce((s, dp) => s + (dp.amount || 0), 0))}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {!data.directPayments || data.directPayments.length === 0 ? (
+                      <span className={`text-xs italic ${subtext}`}>
+                        No direct payments configured. Add payments made to builder or institution below.
+                      </span>
+                    ) : (
+                      data.directPayments
+                        .slice()
+                        .sort((a, b) => a.month - b.month || (a.day || 1) - (b.day || 1))
+                        .map((dp) => (
+                          <span
+                            key={dp.id || `${dp.month}-${dp.day}`}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border shadow-xs ${
+                              isDark
+                                ? "bg-teal-500/10 text-teal-300 border-teal-500/20"
+                                : "bg-teal-50 text-teal-700 border-teal-200"
+                            }`}
+                          >
+                            <span
+                              className="cursor-pointer hover:underline"
+                              onClick={() => {
+                                setNewDirectPay({
+                                  id: dp.id,
+                                  month: dp.month,
+                                  day: dp.day || 1,
+                                  amount: dp.amount.toString(),
+                                  recipient: dp.recipient || "",
+                                  originalId: dp.id || `${dp.month}-${dp.day || 1}`,
+                                });
+                              }}
+                              title="Click to edit direct payment"
+                            >
+                              M{dp.month} · D{dp.day || 1}: {fmt(dp.amount)}
+                              {dp.recipient ? ` (${dp.recipient})` : ""}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateData({
+                                  directPayments: (data.directPayments || []).filter((x) =>
+                                    dp.id
+                                      ? x.id !== dp.id
+                                      : x.month !== dp.month || (x.day || 1) !== (dp.day || 1),
+                                  ),
+                                })
+                              }
+                              className="hover:opacity-60 transition-opacity p-0.5 rounded cursor-pointer"
+                              title="Remove direct payment"
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  className={`lg:col-span-7 p-3.5 rounded-xl border ${
+                    isDark ? "bg-slate-900/80 border-slate-800" : "bg-white border-slate-200 shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-semibold ${subtext}`}>
+                      {newDirectPay.originalId
+                        ? "Edit Direct Payment"
+                        : "Add Direct Payment to Third Party (Builder / Institution)"}
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-lg font-mono border ${
+                        isDark
+                          ? "bg-teal-500/10 text-teal-300 border-teal-500/20"
+                          : "bg-teal-50 text-teal-700 border-teal-200"
+                      }`}
+                    >
+                      📅 {getResolvedDate(newDirectPay.month, newDirectPay.day)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <NumInput
+                      placeholder="Month"
+                      value={newDirectPay.month}
+                      onChange={(v) => setNewDirectPay({ ...newDirectPay, month: v })}
+                      onEnter={addDirectPay}
+                      isDark={isDark}
+                      min={1}
+                      max={data.years * 12}
+                    />
+                    <NumInput
+                      placeholder="Day (1-31)"
+                      value={newDirectPay.day}
+                      onChange={(v) =>
+                        setNewDirectPay({
+                          ...newDirectPay,
+                          day: Math.min(31, Math.max(1, v)),
+                        })
+                      }
+                      onEnter={addDirectPay}
+                      isDark={isDark}
+                      min={1}
+                      max={31}
+                    />
+                    <StrInput
+                      placeholder="Amount"
+                      value={newDirectPay.amount}
+                      onChange={(v) => setNewDirectPay({ ...newDirectPay, amount: v })}
+                      onEnter={addDirectPay}
+                      isDark={isDark}
+                    />
+                    <StrInput
+                      placeholder="Recipient (e.g. Builder, Institution)"
+                      value={newDirectPay.recipient}
+                      onChange={(v) => setNewDirectPay({ ...newDirectPay, recipient: v })}
+                      onEnter={addDirectPay}
+                      isDark={isDark}
+                    />
+                    <ActionBtn onClick={addDirectPay} color="teal" isDark={isDark}>
+                      {newDirectPay.originalId ? "Save" : "Add Direct Payment"}
+                    </ActionBtn>
+                    {newDirectPay.originalId && (
+                      <CancelBtn
+                        onClick={() =>
+                          setNewDirectPay({
+                            month: 1,
+                            day: 1,
+                            amount: "",
+                            recipient: "",
+                          })
+                        }
+                        isDark={isDark}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1344,29 +1776,46 @@ export function AdvancedStrategies({
                 </span>
               </div>
               <div className="flex flex-wrap gap-1 mb-3 min-h-[42px]">
-                {data.customEmis.map((e) => (
-                  <span
-                    key={e.id || `${e.fromMonth}-${e.day}`}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
-                      isDark ? "bg-violet-500/10 text-violet-300 border-violet-500/20" : "bg-violet-50 text-violet-700 border-violet-200"
-                    }`}
-                  >
-                    <span>M{e.fromMonth}: {fmt(e.amount)}</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateData({
-                          customEmis: data.customEmis.filter((x) =>
-                            e.id ? x.id !== e.id : x.fromMonth !== e.fromMonth,
-                          ),
-                        })
-                      }
-                      className="hover:opacity-70"
+                {data.customEmis.map((e) => {
+                  const eType =
+                    e.type || (e.amount !== undefined && e.amount > 0 ? "custom" : "interest_only");
+                  const shortLabel =
+                    eType === "interest_only"
+                      ? `M${e.fromMonth}: Only Interest`
+                      : eType === "recalculated"
+                      ? `M${e.fromMonth}: Recalculated`
+                      : `M${e.fromMonth}: ${fmt(e.amount || 0)}`;
+
+                  return (
+                    <span
+                      key={e.id || `${e.fromMonth}-${e.day}`}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                        isDark
+                          ? "bg-violet-500/10 text-violet-300 border-violet-500/20"
+                          : "bg-violet-50 text-violet-700 border-violet-200"
+                      }`}
                     >
-                      <X size={10} />
-                    </button>
-                  </span>
-                ))}
+                      <span>{shortLabel}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateData({
+                            customEmis: data.customEmis.filter((x) =>
+                              e.id
+                                ? x.id !== e.id
+                                : x.fromMonth !== e.fromMonth ||
+                                  (x.day || 1) !== (e.day || 1),
+                            ),
+                          })
+                        }
+                        className="hover:opacity-70 cursor-pointer"
+                        title="Remove"
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
             </div>
             <button
@@ -1559,7 +2008,71 @@ export function AdvancedStrategies({
             </button>
           </div>
 
-          {/* Card 6: Fees & Charges */}
+          {/* Card: Direct Payments */}
+          <div
+            className={`p-4 rounded-2xl border flex flex-col justify-between ${
+              isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5">
+                <div className="flex items-center gap-1.5">
+                  <Building2 size={14} className="text-teal-400" />
+                  <span className={`text-xs font-bold uppercase tracking-wider ${heading}`}>
+                    Direct Payments
+                  </span>
+                </div>
+                <span className="text-xs font-bold font-mono text-teal-400">
+                  {fmt((data.directPayments || []).reduce((s, dp) => s + (dp.amount || 0), 0))}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-3 min-h-[42px]">
+                {(data.directPayments || []).map((dp) => (
+                  <span
+                    key={dp.id || `${dp.month}-${dp.day}`}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isDark ? "bg-teal-500/10 text-teal-300 border-teal-500/20" : "bg-teal-50 text-teal-700 border-teal-200"
+                    }`}
+                  >
+                    <span>M{dp.month}: {fmt(dp.amount)}{dp.recipient ? ` (${dp.recipient})` : ""}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateData({
+                          directPayments: (data.directPayments || []).filter((x) =>
+                            dp.id
+                              ? x.id !== dp.id
+                              : x.month !== dp.month || (x.day || 1) !== (dp.day || 1),
+                          ),
+                        })
+                      }
+                      className="hover:opacity-70 cursor-pointer"
+                      title="Remove"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+                {(!data.directPayments || data.directPayments.length === 0) && (
+                  <span className={`text-[11px] italic ${subtext}`}>
+                    No direct payments recorded.
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("directPayments");
+                setLayoutMode("workbench");
+              }}
+              className="w-full py-1.5 rounded-xl text-xs font-semibold text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/20 transition-all cursor-pointer"
+            >
+              + Configure Direct Payments
+            </button>
+          </div>
+
+          {/* Card 7: Fees & Charges */}
           <div
             className={`p-4 rounded-2xl border flex flex-col justify-between ${
               isDark ? "bg-slate-900/40 border-slate-800" : "bg-slate-50/80 border-slate-200"

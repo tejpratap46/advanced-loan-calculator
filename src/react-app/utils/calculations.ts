@@ -1,4 +1,4 @@
-import type { LoanData, ScheduleRow, MiscExpense, DayDetail, Dispersal, LumpSum } from "../types/index.ts";
+import type { LoanData, ScheduleRow, MiscExpense, DayDetail, Dispersal, LumpSum, CustomEmiType } from "../types/index.ts";
 
 export interface MonthCalendarInfo {
   year: number;
@@ -75,6 +75,7 @@ export const calculateSchedule = (
     customEmis: ces,
     lumpSums: ls,
     customRates: crs = [],
+    directPayments: dps = [],
     principal,
   } = data;
 
@@ -110,7 +111,7 @@ export const calculateSchedule = (
   const getCE = (m: number) =>
     ces
       .filter((e) => e.fromMonth <= m)
-      .sort((a, b) => b.fromMonth - a.fromMonth)[0] || null;
+      .sort((a, b) => b.fromMonth - a.fromMonth || (b.day || 1) - (a.day || 1))[0] || null;
 
   const getOD = (m: number) => {
     const customOds = data.customOds ?? [];
@@ -187,6 +188,7 @@ export const calculateSchedule = (
   // ── Step 2: Actual Schedule Calculation with Day-Wise Granularity ──
   let actualRem = 0;
   let cumDisbursed = 0;
+  let cumDirectPaid = 0;
 
   for (let m = 1; m <= tm; m++) {
     const cal = getMonthCalendarInfo(sd, m);
@@ -198,6 +200,23 @@ export const calculateSchedule = (
     for (const d of mDisbs) {
       const day = Math.min(cal.daysInMonth, Math.max(1, d.day ?? cal.startDay));
       dayDisbMap[day] = (dayDisbMap[day] || 0) + d.amount;
+    }
+
+    // Direct payments in this month (to third party e.g. builder/institution)
+    const mDirects = dps.filter((dp) => dp.month === m);
+    const dayDirectMap: Record<number, { amount: number; recipient?: string }> = {};
+    for (const dp of mDirects) {
+      const day = Math.min(cal.daysInMonth, Math.max(1, dp.day ?? cal.startDay));
+      if (!dayDirectMap[day]) {
+        dayDirectMap[day] = { amount: dp.amount, recipient: dp.recipient };
+      } else {
+        dayDirectMap[day].amount += dp.amount;
+        if (dp.recipient) {
+          dayDirectMap[day].recipient = dayDirectMap[day].recipient
+            ? `${dayDirectMap[day].recipient}, ${dp.recipient}`
+            : dp.recipient;
+        }
+      }
     }
 
     // Lump sums in this month (Month 0 lump sums apply in Month 1 on day 1 or startDay)
@@ -280,10 +299,15 @@ export const calculateSchedule = (
           : (approxPreRem * monthlyRate * Math.pow(1 + monthlyRate, rm)) /
             (Math.pow(1 + monthlyRate, rm) - 1);
 
-    const targetEmiAmt = activeCE ? activeCE.amount : stdEmi;
+    const isInterestOnly = activeCE?.type === "interest_only";
+    const isRecalculated = activeCE?.type === "recalculated";
+    const isCustomAmount =
+      activeCE?.type === "custom" ||
+      (!activeCE?.type && activeCE?.amount !== undefined && activeCE.amount > 0);
 
     let monthDisb = 0;
     let monthLump = 0;
+    let monthDirectPay = 0;
     let monthPrinPay = 0;
     let monthIntPay = 0;
     let monthEmi = 0;
@@ -315,6 +339,20 @@ export const calculateSchedule = (
         dayEvents.push(`Disbursement: +${dDisb}`);
       }
 
+      // 1b. Direct payment to third party on day d
+      const dDirect = dayDirectMap[d];
+      let dayDirectAmt = 0;
+      let dayDirectRecipient: string | undefined;
+      if (dDirect && dDirect.amount > 0) {
+        dayDirectAmt = dDirect.amount;
+        dayDirectRecipient = dDirect.recipient;
+        cumDirectPaid += dDirect.amount;
+        monthDirectPay += dDirect.amount;
+        dayEvents.push(
+          `Direct Payment: +${dDirect.amount}${dDirect.recipient ? ` (${dDirect.recipient})` : ""}`,
+        );
+      }
+
       // 2. Lump sum on day d
       const dLump = dayLumpMap[d] || 0;
       let actualDayLump = 0;
@@ -333,20 +371,51 @@ export const calculateSchedule = (
         const netBeforeEmi = Math.max(0, actualRem - odb);
         const dayMonthlyRate = dayRate / 100 / 12;
         const estMonthlyInt = netBeforeEmi * dayMonthlyRate;
-        let pp = targetEmiAmt - estMonthlyInt;
-        if (pp > actualRem) pp = actualRem;
-        if (pp > 0) {
-          actualRem = Math.max(0, actualRem - pp);
-          dayPrinFromEmi = pp;
-          monthPrinPay += pp;
+
+        if (isInterestOnly) {
+          // Option 1: No Principal paid, only interest paid
+          dayPrinFromEmi = 0;
+          dayEmiAmt = estMonthlyInt;
+          monthEmi += estMonthlyInt;
+          dayEvents.push(`Interest-Only EMI: ${Math.round(estMonthlyInt)} (No Principal)`);
+        } else if (isRecalculated) {
+          // Option 2: Correct calculated Principal and interest paid
+          let pp = stdEmi - estMonthlyInt;
+          if (pp > actualRem) pp = actualRem;
+          if (pp > 0) {
+            actualRem = Math.max(0, actualRem - pp);
+            dayPrinFromEmi = pp;
+            monthPrinPay += pp;
+          }
+          dayEmiAmt = stdEmi;
+          monthEmi += stdEmi;
+          dayEvents.push(`Recalculated EMI: ${Math.round(stdEmi)}`);
+        } else if (isCustomAmount && activeCE?.amount !== undefined) {
+          // Option 3: Custom amount paid (higher than P+I)
+          const targetEmiAmt = activeCE.amount;
+          let pp = targetEmiAmt - estMonthlyInt;
+          if (pp > actualRem) pp = actualRem;
+          if (pp > 0) {
+            actualRem = Math.max(0, actualRem - pp);
+            dayPrinFromEmi = pp;
+            monthPrinPay += pp;
+          }
+          dayEmiAmt = targetEmiAmt;
+          monthEmi += targetEmiAmt;
+          dayEvents.push(`Custom EMI: ${targetEmiAmt}`);
+        } else {
+          // Standard EMI
+          let pp = stdEmi - estMonthlyInt;
+          if (pp > actualRem) pp = actualRem;
+          if (pp > 0) {
+            actualRem = Math.max(0, actualRem - pp);
+            dayPrinFromEmi = pp;
+            monthPrinPay += pp;
+          }
+          dayEmiAmt = stdEmi;
+          monthEmi += stdEmi;
+          dayEvents.push(`EMI Payment: ${Math.round(stdEmi)}`);
         }
-        dayEmiAmt = targetEmiAmt;
-        monthEmi += targetEmiAmt;
-        dayEvents.push(
-          activeCE
-            ? `Custom EMI: ${targetEmiAmt}`
-            : `EMI Payment: ${Math.round(targetEmiAmt)}`,
-        );
       }
 
       // 4. Daily interest accrual on net balance
@@ -356,7 +425,10 @@ export const calculateSchedule = (
 
       // Benchmark daily interest for interest saved
       const stdDayInt = benchDaily[d - 1] ?? (actualRem * dailyRate);
-      const daySaved = Math.max(0, stdDayInt - dayInt);
+      const loanDaySaved = Math.max(0, stdDayInt - dayInt);
+      // Direct payment interest savings (avoided borrowing interest while loan is active)
+      const directIntSaved = actualRem > 0 ? cumDirectPaid * dailyRate : 0;
+      const daySaved = loanDaySaved + directIntSaved;
       monthIntSaved += daySaved;
 
       dayDetails.push({
@@ -367,6 +439,8 @@ export const calculateSchedule = (
         disbAmt: dDisb,
         emiAmt: dayEmiAmt,
         lumpAmt: actualDayLump,
+        directPayAmt: dayDirectAmt > 0 ? dayDirectAmt : undefined,
+        directPayRecipient: dayDirectRecipient,
         prinPay: dayPrinFromEmi + actualDayLump,
         intPay: dayInt,
         interestSaved: daySaved,
@@ -385,6 +459,20 @@ export const calculateSchedule = (
       monthEmi = monthPrinPay + monthIntPay;
     }
 
+    let customEmiAmtValue: number | null = null;
+    let customEmiTypeValue: CustomEmiType | undefined = undefined;
+    if (activeCE) {
+      customEmiTypeValue =
+        activeCE.type || (activeCE.amount !== undefined ? "custom" : "interest_only");
+      if (customEmiTypeValue === "interest_only") {
+        customEmiAmtValue = monthEmi > 0 ? monthEmi : null;
+      } else if (customEmiTypeValue === "recalculated") {
+        customEmiAmtValue = stdEmi > 0 ? stdEmi : null;
+      } else if (customEmiTypeValue === "custom") {
+        customEmiAmtValue = activeCE.amount ?? null;
+      }
+    }
+
     rows.push({
       m,
       date: cal.monthDate.toLocaleDateString(locale, {
@@ -394,13 +482,16 @@ export const calculateSchedule = (
       rate: emiDayRate,
       disbAmt: monthDisb,
       emi: monthEmi,
+      directPayAmt: monthDirectPay > 0 ? monthDirectPay : undefined,
+      cumDirectPay: cumDirectPaid > 0 ? cumDirectPaid : undefined,
       prinPay: monthPrinPay,
       intPay: monthIntPay,
       remaining: actualRem,
       cumDisbursed,
       payType: pt,
       stdEmi,
-      customEmiAmt: activeCE ? activeCE.amount : null,
+      customEmiAmt: customEmiAmtValue,
+      customEmiType: customEmiTypeValue,
       lumpAmt: monthLump > 0 ? monthLump : null,
       interestSaved: monthIntSaved,
       odBal: odb,
@@ -472,8 +563,9 @@ export const calculateTotals = (
       p: a.p + r.prinPay,
       i: a.i + r.intPay,
       s: a.s + r.interestSaved,
+      dp: a.dp + (r.directPayAmt || 0),
     }),
-    { d: 0, e: 0, p: 0, i: 0, s: 0 },
+    { d: 0, e: 0, p: 0, i: 0, s: 0, dp: 0 },
   );
   const totalMisc = (miscExpenses || []).reduce(
     (sum, item) => sum + (item.amount || 0),

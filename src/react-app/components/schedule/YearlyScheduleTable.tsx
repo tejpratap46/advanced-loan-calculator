@@ -8,6 +8,7 @@ interface YearlyScheduleTableProps {
   locale?: string;
   isDark: boolean;
   hasOd: boolean;
+  hasDirectPay?: boolean;
   cm: number;
   expandedMonths: Record<number, boolean>;
   toggleMonth: (m: number) => void;
@@ -20,6 +21,7 @@ export function YearlyScheduleTable({
   locale = "en-US",
   isDark,
   hasOd,
+  hasDirectPay = false,
   cm,
   expandedMonths,
   toggleMonth,
@@ -46,6 +48,7 @@ export function YearlyScheduleTable({
         label: string;
         months: ScheduleRow[];
         annualDisb: number;
+        annualDirectPay: number;
         annualEmi: number;
         annualPrin: number;
         annualInt: number;
@@ -65,6 +68,7 @@ export function YearlyScheduleTable({
           label: `Year ${yearNum}`,
           months: [],
           annualDisb: 0,
+          annualDirectPay: 0,
           annualEmi: 0,
           annualPrin: 0,
           annualInt: 0,
@@ -79,6 +83,7 @@ export function YearlyScheduleTable({
       const y = yearsMap[yearNum];
       y.months.push(row);
       y.annualDisb += row.disbAmt || 0;
+      y.annualDirectPay += row.directPayAmt || 0;
       y.annualEmi += row.emi || 0;
       y.annualPrin += row.prinPay || 0;
       y.annualInt += row.intPay || 0;
@@ -87,7 +92,12 @@ export function YearlyScheduleTable({
 
       if (row.m === cm) y.isCurrent = true;
       if (row.m >= cm) y.isPaid = false;
-      if (row.disbAmt > 0 || (row.lumpAmt || 0) > 0 || row.payType === "custom") {
+      if (
+        row.disbAmt > 0 ||
+        (row.lumpAmt || 0) > 0 ||
+        (row.directPayAmt || 0) > 0 ||
+        row.payType === "custom"
+      ) {
         y.hasEvents = true;
       }
     });
@@ -149,6 +159,7 @@ export function YearlyScheduleTable({
                 "Year / Period",
                 "Status",
                 "Annual Disb",
+                ...(hasDirectPay ? ["Annual Direct Pay"] : []),
                 "Annual EMI",
                 "Annual Principal",
                 "Annual Interest",
@@ -241,6 +252,12 @@ export function YearlyScheduleTable({
                       {y.annualDisb > 0 ? fmt(y.annualDisb) : "—"}
                     </td>
 
+                    {hasDirectPay && (
+                      <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
+                        {y.annualDirectPay > 0 ? fmt(y.annualDirectPay) : "—"}
+                      </td>
+                    )}
+
                     <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
                       {fmt(y.annualEmi)}
                     </td>
@@ -265,7 +282,7 @@ export function YearlyScheduleTable({
                   {/* Expanded Months for this Year */}
                   {isYearExpanded && (
                     <tr>
-                      <td colSpan={8} className="p-0">
+                      <td colSpan={8 + (hasDirectPay ? 1 : 0)} className="p-0">
                         <div
                           className={`p-3 pl-8 border-b ${
                             isDark ? "bg-slate-950/50" : "bg-slate-50/60"
@@ -288,6 +305,9 @@ export function YearlyScheduleTable({
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Date</th>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Rate</th>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Disb</th>
+                                  {hasDirectPay && (
+                                    <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Direct Pay</th>
+                                  )}
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>EMI</th>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Principal</th>
                                   <th className={`px-2 py-1.5 text-left text-[10px] ${subtext}`}>Interest</th>
@@ -343,6 +363,11 @@ export function YearlyScheduleTable({
                                         <td className="px-2 py-1.5 text-sky-400 font-mono">
                                           {r.disbAmt > 0 ? fmt(r.disbAmt) : "—"}
                                         </td>
+                                        {hasDirectPay && (
+                                          <td className="px-2 py-1.5 text-teal-400 font-mono">
+                                            {(r.directPayAmt || 0) > 0 ? fmt(r.directPayAmt!) : "—"}
+                                          </td>
+                                        )}
                                         <td className={`px-2 py-1.5 font-mono font-semibold ${heading}`}>
                                           {r.emi > 0 ? fmt(r.emi) : "—"}
                                         </td>
@@ -368,7 +393,7 @@ export function YearlyScheduleTable({
                                       {/* Day-Wise Breakdown if expanded */}
                                       {isMonthExpanded && (
                                         <tr>
-                                          <td colSpan={hasOd ? 10 : 9} className="p-0">
+                                          <td colSpan={9 + (hasOd ? 1 : 0) + (hasDirectPay ? 1 : 0)} className="p-0">
                                             {renderDailyBreakdown(r)}
                                           </td>
                                         </tr>

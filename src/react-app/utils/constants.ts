@@ -26,5 +26,6 @@ export const DEFAULT_DATA: LoanData = {
   customRates: [],
   baselineOd: 0,
   customOds: [],
+  directPayments: [],
   miscExpenses: [],
 };

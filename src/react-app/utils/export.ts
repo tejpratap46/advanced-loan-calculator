@@ -11,16 +11,18 @@ const escapeCSVCell = (val: unknown): string => {
 
 export const generateCSV = (
   schedule: ScheduleRow[],
-  totals: { d: number; e: number; p: number; i: number; s: number; m?: number },
+  totals: { d: number; e: number; p: number; i: number; s: number; dp?: number; m?: number },
   currentMonth: number,
   miscExpenses: MiscExpense[] = [],
 ) => {
+  const hasDirectPay = schedule.some((r) => (r.directPayAmt || 0) > 0);
   const headers = [
     "Month",
     "Date",
     "Rate (%)",
     "Status",
     "Disbursement",
+    ...(hasDirectPay ? ["Direct Pay"] : []),
     "EMI",
     "Std EMI",
     "Custom EMI",
@@ -47,6 +49,7 @@ export const generateCSV = (
       r.rate !== undefined ? `${r.rate}%` : "",
       status,
       r.disbAmt || "",
+      ...(hasDirectPay ? [r.directPayAmt ? Math.round(r.directPayAmt) : ""] : []),
       r.emi ? Math.round(r.emi) : "",
       r.stdEmi ? Math.round(r.stdEmi) : "",
       r.customEmiAmt || "",
@@ -65,6 +68,7 @@ export const generateCSV = (
     "",
     "",
     Math.round(totals.d),
+    ...(hasDirectPay ? [totals.dp ? Math.round(totals.dp) : ""] : []),
     Math.round(totals.e),
     "",
     "",
@@ -79,17 +83,18 @@ export const generateCSV = (
   let csvRows = [headers, ...rows, totalRow];
 
   if (miscExpenses.length > 0) {
-    const miscHeaderRow = ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
-    const miscTitleRow = ["MISC EXPENSES & CHARGES", "", "", "", "", "", "", "", "", "", "", "", "", ""];
-    const miscSubHeaders = ["Date", "Amount", "Comments", "", "", "", "", "", "", "", "", "", "", ""];
+    const emptyCols = new Array(headers.length).fill("");
+    const miscHeaderRow = [...emptyCols];
+    const miscTitleRow = ["MISC EXPENSES & CHARGES", ...emptyCols.slice(1)];
+    const miscSubHeaders = ["Date", "Amount", "Comments", ...emptyCols.slice(3)];
     const miscDataRows = miscExpenses.map((e) => [
       e.date,
       e.amount,
       e.comments,
-      "", "", "", "", "", "", "", "", "", "", "",
+      ...emptyCols.slice(3),
     ]);
     const totalMiscAmount = miscExpenses.reduce((sum, item) => sum + item.amount, 0);
-    const miscTotalRow = ["TOTAL MISC CHARGES", totalMiscAmount, "", "", "", "", "", "", "", "", "", "", "", ""];
+    const miscTotalRow = ["TOTAL MISC CHARGES", totalMiscAmount, ...emptyCols.slice(2)];
 
     csvRows = [
       ...csvRows,
@@ -109,6 +114,7 @@ export const generateCSV = (
 };
 
 export const generateDailyCSV = (schedule: ScheduleRow[]) => {
+  const hasDirectPay = schedule.some((r) => r.days?.some((d) => (d.directPayAmt || 0) > 0));
   const headers = [
     "Month",
     "Day",
@@ -116,6 +122,7 @@ export const generateDailyCSV = (schedule: ScheduleRow[]) => {
     "Rate (%)",
     "Events",
     "Disbursement",
+    ...(hasDirectPay ? ["Direct Pay"] : []),
     "EMI Payment",
     "Lump Sum",
     "Principal Paid",
@@ -137,6 +144,7 @@ export const generateDailyCSV = (schedule: ScheduleRow[]) => {
         d.rate !== undefined ? `${d.rate}%` : "",
         (d.events || []).join("; "),
         d.disbAmt || "",
+        ...(hasDirectPay ? [d.directPayAmt ? Math.round(d.directPayAmt) : ""] : []),
         d.emiAmt ? Math.round(d.emiAmt) : "",
         d.lumpAmt || "",
         d.prinPay ? Math.round(d.prinPay) : "",

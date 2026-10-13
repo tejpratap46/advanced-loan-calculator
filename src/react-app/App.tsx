@@ -19,6 +19,7 @@ import {
   Sparkles,
   Calendar,
   TrendingUp,
+  Building2,
 } from "lucide-react";
 
 // Types
@@ -472,6 +473,7 @@ export default function LoanCalculator() {
 
   const cm = getCurrentMonth(data.startDate);
   const hasOd = !!((data.baselineOd && data.baselineOd > 0) || (data.customOds && data.customOds.length > 0));
+  const hasDirectPayments = (data.directPayments?.length || 0) > 0;
   const paidTill = schedule
     .slice(0, Math.min(cm, schedule.length))
     .reduce((s, r) => s + r.emi, 0);
@@ -528,6 +530,7 @@ export default function LoanCalculator() {
       return schedule.filter(
         (r) =>
           (r.lumpAmt || 0) > 0 ||
+          (r.directPayAmt || 0) > 0 ||
           r.payType === "custom" ||
           r.disbAmt > 0 ||
           r.interestSaved > 0,
@@ -577,6 +580,9 @@ export default function LoanCalculator() {
                 <th className={`px-2 py-1.5 text-left font-semibold text-[10px] ${subtext}`}>Day / Date</th>
                 <th className={`px-2 py-1.5 text-left font-semibold text-[10px] ${subtext}`}>Events</th>
                 <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Disbursement</th>
+                {hasDirectPayments && (
+                  <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Direct Pay</th>
+                )}
                 <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Payment / EMI</th>
                 <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Lump Sum</th>
                 <th className={`px-2 py-1.5 text-right font-semibold text-[10px] ${subtext}`}>Prin Repaid</th>
@@ -629,6 +635,11 @@ export default function LoanCalculator() {
                     <td className="px-2 py-1 text-right font-mono text-sky-400">
                       {d.disbAmt > 0 ? fmt(d.disbAmt) : <span className={subtext}>—</span>}
                     </td>
+                    {hasDirectPayments && (
+                      <td className="px-2 py-1 text-right font-mono text-teal-400">
+                        {(d.directPayAmt || 0) > 0 ? fmt(d.directPayAmt!) : <span className={subtext}>—</span>}
+                      </td>
+                    )}
                     <td className="px-2 py-1 text-right font-mono">
                       {d.emiAmt > 0 ? fmt(d.emiAmt) : <span className={subtext}>—</span>}
                     </td>
@@ -667,6 +678,11 @@ export default function LoanCalculator() {
                 <td className="px-2 py-1.5 text-right font-mono text-sky-400">
                   {r.disbAmt > 0 ? fmt(r.disbAmt) : "—"}
                 </td>
+                {hasDirectPayments && (
+                  <td className="px-2 py-1.5 text-right font-mono text-teal-400">
+                    {(r.directPayAmt || 0) > 0 ? fmt(r.directPayAmt!) : "—"}
+                  </td>
+                )}
                 <td className="px-2 py-1.5 text-right font-mono">
                   {r.emi > 0 ? fmt(r.emi) : "—"}
                 </td>
@@ -1305,7 +1321,7 @@ export default function LoanCalculator() {
         </div>
 
         {/* ── KPI Metric Cards Strip ──────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className={`grid grid-cols-2 sm:grid-cols-4 ${hasDirectPayments ? "lg:grid-cols-8" : "lg:grid-cols-7"} gap-3`}>
           <MetricCard
             label="Disbursed"
             value={fmt(totals.d)}
@@ -1313,6 +1329,15 @@ export default function LoanCalculator() {
             isDark={isDark}
             icon={<Wallet size={14} />}
           />
+          {hasDirectPayments && (
+            <MetricCard
+              label="Direct Paid"
+              value={fmt(totals.dp || 0)}
+              colorScheme="teal"
+              isDark={isDark}
+              icon={<Building2 size={14} />}
+            />
+          )}
           <MetricCard
             label="Total Interest"
             value={fmt(totals.i)}
@@ -1388,6 +1413,7 @@ export default function LoanCalculator() {
             getResolvedDate={getResolvedDate}
             externalActiveTab={strategyTab}
             onActiveTabChange={setStrategyTab}
+            schedule={schedule}
           />
         </div>
 
@@ -1418,6 +1444,7 @@ export default function LoanCalculator() {
                 locale={locale}
                 isDark={isDark}
                 hasOd={hasOd}
+                hasDirectPay={hasDirectPayments}
                 cm={cm}
                 expandedMonths={expandedMonths}
                 toggleMonth={toggleMonth}
@@ -1439,6 +1466,7 @@ export default function LoanCalculator() {
                       "Rate",
                       "Status",
                       "Disbursement",
+                      ...(hasDirectPayments ? ["Direct Pay"] : []),
                       "Monthly EMI",
                       "Std EMI",
                       "Custom EMI",
@@ -1552,6 +1580,12 @@ export default function LoanCalculator() {
                             {r.disbAmt > 0 ? fmt(r.disbAmt) : <span className={subtext}>—</span>}
                           </td>
 
+                          {hasDirectPayments && (
+                            <td className="px-3 py-2.5 text-teal-400 font-mono font-medium">
+                              {(r.directPayAmt || 0) > 0 ? fmt(r.directPayAmt!) : <span className={subtext}>—</span>}
+                            </td>
+                          )}
+
                           <td className={`px-3 py-2.5 font-mono font-bold ${heading}`}>
                             {r.emi > 0 ? fmt(r.emi) : <span className={subtext}>—</span>}
                           </td>
@@ -1561,7 +1595,23 @@ export default function LoanCalculator() {
                           </td>
 
                           <td className="px-3 py-2.5 text-violet-400 font-mono font-medium">
-                            {r.customEmiAmt ? fmt(r.customEmiAmt) : <span className={subtext}>—</span>}
+                            {r.customEmiAmt ? (
+                              <div className="flex flex-col">
+                                <span>{fmt(r.customEmiAmt)}</span>
+                                {r.customEmiType === "interest_only" && (
+                                  <span className="text-[9px] text-violet-400/80 font-sans font-normal">
+                                    Interest Only
+                                  </span>
+                                )}
+                                {r.customEmiType === "recalculated" && (
+                                  <span className="text-[9px] text-violet-400/80 font-sans font-normal">
+                                    Recalculated
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className={subtext}>—</span>
+                            )}
                           </td>
 
                           <td className="px-3 py-2.5 text-amber-400 font-mono font-medium">
